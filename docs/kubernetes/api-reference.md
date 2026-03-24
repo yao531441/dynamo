@@ -1409,7 +1409,7 @@ _Underlying type:_ _string_
 GPUSKUType is the AIC hardware system identifier for a supported GPU.
 
 _Validation:_
-- Enum: [gb200_sxm h200_sxm h100_sxm b200_sxm a100_sxm l40s]
+- Enum: [gb200_sxm h200_sxm h100_sxm b200_sxm a100_sxm l40s gaudi3 gaudi2]
 
 _Appears in:_
 - [HardwareSpec](#hardwarespec)
@@ -1422,6 +1422,8 @@ _Appears in:_
 | `b200_sxm` |  |
 | `a100_sxm` |  |
 | `l40s` |  |
+| `gaudi3` |  |
+| `gaudi2` |  |
 
 
 #### HardwareSpec
@@ -1438,7 +1440,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `gpuSku` _[GPUSKUType](#gpuskutype)_ | GPUSKU is the AIC hardware system identifier for the GPU.<br />When omitted, the operator auto-detects this via InferHardwareSystem from cluster GPU node labels. |  | Enum: [gb200_sxm h200_sxm h100_sxm b200_sxm a100_sxm l40s] <br />Optional: \{\} <br /> |
+| `acceleratorType` _string_ | AcceleratorType specifies the type of accelerator hardware.<br />When set to "auto" or omitted, the operator attempts auto-detection.<br />Set explicitly (e.g., "nvidia", "intel") to skip auto-detection. | auto | Enum: [auto nvidia intel amd] <br />Optional: \{\} <br /> |
+| `gpuSku` _[GPUSKUType](#gpuskutype)_ | GPUSKU is the AIC hardware system identifier for the GPU.<br />When omitted, the operator auto-detects this via InferHardwareSystem from cluster GPU node labels. |  | Enum: [gb200_sxm h200_sxm h100_sxm b200_sxm a100_sxm l40s gaudi3 gaudi2] <br />Optional: \{\} <br /> |
 | `vramMb` _float_ | VRAMMB is the VRAM per GPU in MiB. |  | Optional: \{\} <br /> |
 | `totalGpus` _integer_ | TotalGPUs is the total number of GPUs available in the cluster. |  | Optional: \{\} <br /> |
 | `numGpusPerNode` _integer_ | NumGPUsPerNode is the number of GPUs per node. |  | Optional: \{\} <br /> |

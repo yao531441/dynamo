@@ -53,6 +53,7 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/gpu"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/hardware"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/observability"
 )
 
@@ -251,6 +252,8 @@ type DynamoGraphDeploymentRequestReconciler struct {
 	RuntimeConfig     *commonController.RuntimeConfig
 	GPUDiscoveryCache *gpu.GPUDiscoveryCache
 	GPUDiscovery      *gpu.GPUDiscovery
+	// HardwareDiscovery is the new hardware discovery manager (preferred over GPUDiscovery)
+	HardwareDiscovery *hardware.DiscoveryManager
 	// RBACMgr handles RBAC setup for profiling jobs
 	RBACManager RBACManager
 }
@@ -870,25 +873,44 @@ func (r *DynamoGraphDeploymentRequestReconciler) validateGPUHardwareInfo(ctx con
 	isNamespaceScoped := r.Config.Namespace.Restricted != ""
 	if isNamespaceScoped {
 		return fmt.Errorf(
-			"GPU hardware info required but cannot be auto-discovered." +
+			"Hardware info required but cannot be auto-discovered." +
 				"\n\nOptions to resolve:" +
 				"\n\n1. Re-enable GPU discovery (if it was disabled during Helm install):" +
 				"\n   helm upgrade ... --set dynamo-operator.gpuDiscovery.enabled=true" +
 				"\n\n2. Add hardware config to spec.hardware:" +
+				"\n   acceleratorType: nvidia  # or intel" +
 				"\n   numGpusPerNode: 8" +
-				"\n   gpuSku: \"H100-SXM5-80GB\"" +
+				"\n   gpuSku: \"h100_sxm\"  # or gaudi3, gaudi2 for Intel" +
 				"\n   vramMb: 81920")
 	}
 
-	_, err := r.GPUDiscovery.DiscoverGPUsFromDCGM(ctx, r.APIReader, r.GPUDiscoveryCache)
-	if err == nil {
-		// GPU discovery is available, validation passes
-		return nil
+	// Try HardwareDiscovery first if available
+	if r.HardwareDiscovery != nil {
+		accType := hardware.AcceleratorTypeAuto
+		if dgdr.Spec.Hardware != nil && dgdr.Spec.Hardware.AcceleratorType != "" {
+			accType = hardware.AcceleratorType(dgdr.Spec.Hardware.AcceleratorType)
+		}
+		_, err := r.HardwareDiscovery.DiscoverWithFallback(ctx, r.APIReader, accType)
+		if err == nil {
+			return nil
+		}
+		reason := GetHardwareDiscoveryFailureReason(err)
+		logger.Info("Hardware discovery not available", "reason", reason, "error", err.Error())
+		return fmt.Errorf("hardware info required but auto-discovery failed; add spec.hardware.acceleratorType, spec.hardware.gpuSku, spec.hardware.vramMb, and spec.hardware.numGpusPerNode")
 	}
-	// Refine the logger message
-	reason := GetGPUDiscoveryFailureReason(err)
-	logger.Info("GPU discovery not available", "reason", reason, "error", err.Error())
-	return fmt.Errorf("GPU hardware info required but auto-discovery failed. Add spec.hardware.gpuSku, spec.hardware.vramMb, spec.hardware.numGpusPerNode")
+
+	// Fallback to legacy GPUDiscovery
+	if r.GPUDiscovery != nil {
+		_, err := r.GPUDiscovery.DiscoverGPUsFromDCGM(ctx, r.APIReader, r.GPUDiscoveryCache)
+		if err == nil {
+			return nil
+		}
+		reason := GetGPUDiscoveryFailureReason(err)
+		logger.Info("GPU discovery not available", "reason", reason, "error", err.Error())
+		return fmt.Errorf("hardware info required but auto-discovery failed; add spec.hardware.acceleratorType, spec.hardware.gpuSku, spec.hardware.vramMb, and spec.hardware.numGpusPerNode")
+	}
+
+	return fmt.Errorf("no hardware discovery mechanism available; add spec.hardware.acceleratorType, spec.hardware.gpuSku, spec.hardware.vramMb, and spec.hardware.numGpusPerNode")
 }
 
 // GetGPUDiscoveryFailureReason classifies a GPU discovery error and
@@ -933,6 +955,52 @@ func GetGPUDiscoveryFailureReason(err error) string {
 		return "no GPU metrics could be parsed from any DCGM pod (check DCGM exporter pod status and network connectivity)"
 	case strings.Contains(errMsg, "failed to create helm path"):
 		return "failed to initialize Helm client (RBAC, kubeconfig, or Helm driver issue)"
+	}
+	return "unknown"
+}
+
+// GetHardwareDiscoveryFailureReason classifies a hardware discovery error and
+// returns a stable, actionable reason string suitable for structured logging.
+// This is the hardware abstraction layer version of GetGPUDiscoveryFailureReason.
+func GetHardwareDiscoveryFailureReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	errMsg := strings.ToLower(err.Error())
+
+	switch {
+	// Intel-specific errors
+	case strings.Contains(errMsg, "intel xpu auto-discovery not implemented"):
+		return "Intel XPU auto-discovery not implemented; use manual hardware configuration"
+	// Generic accelerator errors
+	case strings.Contains(errMsg, "no discoverer registered for accelerator type"):
+		return "no discoverer registered for the specified accelerator type"
+	case strings.Contains(errMsg, "no hardware discoverers registered"):
+		return "no hardware discoverers registered in the manager"
+	case strings.Contains(errMsg, "all hardware discovery attempts failed"):
+		return "all hardware discovery attempts failed"
+	// Legacy GPU discovery errors (for backward compatibility)
+	case strings.Contains(errMsg, "list pods"):
+		return "failed to list DCGM exporter pods (RBAC/cluster connectivity issue)"
+	case strings.Contains(errMsg, "gpu operator is not installed"):
+		return "GPU Operator not installed in expected namespace"
+	case strings.Contains(errMsg, "timeout waiting for dcgm exporter pods"):
+		return "timeout while waiting for DCGM exporter pods to become ready"
+	case strings.Contains(errMsg, "http get"):
+		return "failed to reach DCGM metrics endpoint on pod (network/port issue)"
+	case strings.Contains(errMsg, "metrics endpoint") &&
+		strings.Contains(errMsg, "status"):
+		return "DCGM pod metrics endpoint returned non-200 status"
+	case strings.Contains(errMsg, "parse prometheus metrics"):
+		return "failed to parse dcgm Prometheus metrics (invalid format)"
+	case strings.Contains(errMsg, "no gpus detected"):
+		return "no GPUs detected in dcgm metrics (GPU model or metrics missing)"
+	case strings.Contains(errMsg, "dcgm is not enabled in the GPU Operator"):
+		return "DCGM is not enabled in the GPU Operator (check GPU Operator configuration and permissions)"
+	case strings.Contains(errMsg, "failed to scrape any dcgm exporter pod"):
+		return "failed to scrape any dcgm exporter pod (check DCGM exporter pod status and network connectivity)"
+	case strings.Contains(errMsg, "no gpu metrics could be parsed from any dcgm pod"):
+		return "no GPU metrics could be parsed from any DCGM pod (check DCGM exporter pod status and network connectivity)"
 	}
 	return "unknown"
 }
@@ -1250,56 +1318,103 @@ func (r *DynamoGraphDeploymentRequestReconciler) enrichHardwareFromDiscovery(ctx
 		return nil // all fields already set by user; TotalGPUs is filled below when discovery runs
 	}
 
-	var gpuInfo *gpu.GPUInfo
+	var accInfo *hardware.AcceleratorInfo
 	logger := log.FromContext(ctx)
+
 	// Check if user provided hardware info in the typed spec
 	hasManualConfig := dgdr.Spec.Hardware != nil && (dgdr.Spec.Hardware.GPUSKU != "" ||
 		dgdr.Spec.Hardware.VRAMMB != nil ||
 		dgdr.Spec.Hardware.NumGPUsPerNode != nil)
-	if !hasManualConfig {
 
-		logger.Info("Attempting GPU discovery for profiling job")
-		discoveredInfo, err := r.GPUDiscovery.DiscoverGPUsFromDCGM(ctx, r.APIReader, r.GPUDiscoveryCache)
+	// Check if user explicitly specified an accelerator type
+	explicitAccType := hw.AcceleratorType != "" && hw.AcceleratorType != "auto"
+
+	if !hasManualConfig {
+		logger.Info("Attempting hardware discovery for profiling job")
+
+		var err error
+
+		// Prefer HardwareDiscovery if available
+		if r.HardwareDiscovery != nil {
+			accType := hardware.AcceleratorTypeAuto
+			if hw.AcceleratorType != "" {
+				accType = hardware.AcceleratorType(hw.AcceleratorType)
+			}
+			accInfo, err = r.HardwareDiscovery.DiscoverWithFallback(ctx, r.APIReader, accType)
+		} else if r.GPUDiscovery != nil {
+			// Fallback to legacy GPUDiscovery
+			gpuInfo, discoverErr := r.GPUDiscovery.DiscoverGPUsFromDCGM(ctx, r.APIReader, r.GPUDiscoveryCache)
+			if discoverErr != nil {
+				err = discoverErr
+			} else {
+				accInfo = gpu.AcceleratorInfoFromGPUInfo(gpuInfo)
+			}
+		} else {
+			err = fmt.Errorf("no hardware discovery mechanism available")
+		}
+
 		if err != nil {
 			// This path is expected for namespace-restricted operators without node read permissions
-			// Refine the logger message
-			reason := GetGPUDiscoveryFailureReason(err)
-			logger.Info("GPU discovery not available, using manual hardware configuration from profiling config",
+			reason := GetHardwareDiscoveryFailureReason(err)
+			logger.Info("Hardware discovery not available, using manual hardware configuration from profiling config",
 				"reason", reason, "error", err.Error())
+
+			// Send Warning Event if user explicitly specified accelerator type
+			if explicitAccType {
+				r.Recorder.Event(dgdr, corev1.EventTypeWarning, "HardwareDiscoveryFailed",
+					fmt.Sprintf("%s accelerator discovery failed: %s", hw.AcceleratorType, err.Error()))
+			}
+
 			return err
-		} else {
-			gpuInfo = discoveredInfo
-			logger.Info("GPU discovery completed successfully",
-				"gpusPerNode", gpuInfo.GPUsPerNode,
-				"nodesWithGPUs", gpuInfo.NodesWithGPUs,
-				"totalGpus", gpuInfo.GPUsPerNode*gpuInfo.NodesWithGPUs,
-				"model", gpuInfo.Model,
-				"vramMiB", gpuInfo.VRAMPerGPU,
-				"system", gpuInfo.System,
-				"cloudprovider", gpuInfo.CloudProvider)
+		}
+
+		logger.Info("Hardware discovery completed successfully",
+			"acceleratorType", accInfo.Type,
+			"gpusPerNode", accInfo.CountPerNode,
+			"nodesWithGPUs", accInfo.NodesCount,
+			"totalGpus", accInfo.TotalCount(),
+			"model", accInfo.Model,
+			"vramMiB", accInfo.MemoryMB,
+			"system", accInfo.System,
+			"cloudprovider", accInfo.CloudProvider)
+	}
+
+	// Handle Intel accelerator SKU - create AcceleratorInfo from manual config
+	if hw.GPUSKU != "" && accInfo == nil {
+		skuStr := string(hw.GPUSKU)
+		if skuStr == "gaudi3" || skuStr == "gaudi2" {
+			accInfo = hardware.NewAcceleratorInfoFromIntelSKU(hw.GPUSKU)
+			logger.Info("Using Intel accelerator configuration from manual SKU",
+				"sku", hw.GPUSKU, "memoryMB", accInfo.MemoryMB)
 		}
 	}
+
+	// Still need discovery info for some fields
+	if accInfo == nil {
+		return fmt.Errorf("no hardware information available")
+	}
+
 	if hw.GPUSKU == "" {
-		if gpuInfo.System != "" {
-			hw.GPUSKU = gpuInfo.System
+		if accInfo.System != "" {
+			hw.GPUSKU = accInfo.System
 		} else {
 			// Unknown GPU type: use raw model name; profiler will attempt naive config generation.
-			hw.GPUSKU = nvidiacomv1beta1.GPUSKUType(gpuInfo.Model)
+			hw.GPUSKU = nvidiacomv1beta1.GPUSKUType(accInfo.Model)
 		}
 	}
 	if hw.VRAMMB == nil {
-		vram := float64(gpuInfo.VRAMPerGPU)
+		vram := float64(accInfo.MemoryMB)
 		hw.VRAMMB = &vram
 	}
 	if hw.NumGPUsPerNode == nil {
-		n := int32(gpuInfo.GPUsPerNode)
+		n := int32(accInfo.CountPerNode)
 		hw.NumGPUsPerNode = &n
 	}
-	if hw.TotalGPUs == nil {
+	if hw.TotalGPUs == nil && accInfo.NodesCount > 0 {
 		// TODO: This is a temporary limit to prevent the profiler from using too many GPUs.
 		// Will be removed once a fix is in the Profiler/AIC.
 		const defaultMaxAutoGPUs = int32(32)
-		total := int32(gpuInfo.GPUsPerNode * gpuInfo.NodesWithGPUs)
+		total := int32(accInfo.CountPerNode * accInfo.NodesCount)
 		if total > defaultMaxAutoGPUs {
 			logger.Info("Capping auto-discovered TotalGPUs at default limit; set hardware.totalGpus to override",
 				"discovered", total, "cap", defaultMaxAutoGPUs)

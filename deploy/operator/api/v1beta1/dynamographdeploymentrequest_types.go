@@ -175,7 +175,7 @@ const (
 )
 
 // GPUSKUType is the AIC hardware system identifier for a supported GPU.
-// +kubebuilder:validation:Enum=gb200_sxm;h200_sxm;h100_sxm;b200_sxm;a100_sxm;l40s
+// +kubebuilder:validation:Enum=gb200_sxm;h200_sxm;h100_sxm;b200_sxm;a100_sxm;l40s;gaudi3;gaudi2
 type GPUSKUType string
 
 const (
@@ -185,6 +185,8 @@ const (
 	GPUSKUTypeB200SXM  GPUSKUType = "b200_sxm"
 	GPUSKUTypeA100SXM  GPUSKUType = "a100_sxm"
 	GPUSKUTypeL40S     GPUSKUType = "l40s"
+	GPUSKUTypeGaudi3   GPUSKUType = "gaudi3"
+	GPUSKUTypeGaudi2   GPUSKUType = "gaudi2"
 )
 
 // BackendType specifies the inference backend.
@@ -321,10 +323,18 @@ type FeaturesSpec struct {
 // HardwareSpec describes the hardware resources available for profiling and deployment.
 // These fields are typically auto-filled by the operator from cluster discovery.
 type HardwareSpec struct {
+	// AcceleratorType specifies the type of accelerator hardware.
+	// When set to "auto" or omitted, the operator attempts auto-detection.
+	// Set explicitly (e.g., "nvidia", "intel") to skip auto-detection.
+	// +optional
+	// +kubebuilder:default=auto
+	// +kubebuilder:validation:Enum=auto;nvidia;intel;amd
+	AcceleratorType string `json:"acceleratorType,omitempty"`
+
 	// GPUSKU is the AIC hardware system identifier for the GPU.
 	// When omitted, the operator auto-detects this via InferHardwareSystem from cluster GPU node labels.
 	// +optional
-	// +kubebuilder:validation:Enum=gb200_sxm;h200_sxm;h100_sxm;b200_sxm;a100_sxm;l40s
+	// +kubebuilder:validation:Enum=gb200_sxm;h200_sxm;h100_sxm;b200_sxm;a100_sxm;l40s;gaudi3;gaudi2
 	GPUSKU GPUSKUType `json:"gpuSku,omitempty"`
 
 	// VRAMMB is the VRAM per GPU in MiB.

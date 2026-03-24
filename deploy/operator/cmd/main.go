@@ -69,6 +69,7 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/controller"
 	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/gpu"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/hardware"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/modelendpoint"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/namespace_scope"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/observability"
@@ -634,6 +635,13 @@ func registerControllers(
 		return fmt.Errorf("unable to create DGDScalingAdapter controller: %w", err)
 	}
 
+	// Initialize hardware discovery manager
+	setupLog.Info("Initializing hardware discovery manager")
+	hardwareDiscovery := hardware.NewDiscoveryManager(
+		hardware.NewNVIDIADiscovery(hardware.ScrapeMetricsEndpoint),
+		hardware.NewIntelDiscovery(),
+	)
+
 	if err = (&controller.DynamoGraphDeploymentRequestReconciler{
 		Client:            mgr.GetClient(),
 		APIReader:         mgr.GetAPIReader(),
@@ -642,6 +650,7 @@ func registerControllers(
 		RuntimeConfig:     runtimeConfig,
 		GPUDiscoveryCache: gpu.NewGPUDiscoveryCache(),
 		GPUDiscovery:      gpu.NewGPUDiscovery(gpu.ScrapeMetricsEndpoint),
+		HardwareDiscovery: hardwareDiscovery,
 		RBACManager:       rbacManager,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create DynamoGraphDeploymentRequest controller: %w", err)

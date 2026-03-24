@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	gpupkg "github.com/ai-dynamo/dynamo/deploy/operator/internal/gpu"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/hardware"
 )
 
 func newFakeReconciler(nodes ...*corev1.Node) *DynamoGraphDeploymentRequestReconciler {
@@ -55,9 +55,9 @@ func gpuNode(name, product string, gpuCount int, vramMiB int) *corev1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				gpupkg.LabelGPUCount:   intStr(gpuCount),
-				gpupkg.LabelGPUProduct: product,
-				gpupkg.LabelGPUMemory:  intStr(vramMiB),
+				hardware.LabelGPUCount:   intStr(gpuCount),
+				hardware.LabelGPUProduct: product,
+				hardware.LabelGPUMemory:  intStr(vramMiB),
 			},
 		},
 	}
