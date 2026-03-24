@@ -11,6 +11,15 @@ source "$SCRIPT_DIR/../../../common/launch_utils.sh"
 MODEL_NAME="Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
 SINGLE_GPU=false
 
+# Device selection: supports CUDA (CUDA_VISIBLE_DEVICES) and XPU (ZE_AFFINITY_MASK)
+# Set DYN_DEVICE=xpu to use Intel XPU device selection
+if [[ "${DYN_DEVICE:-cuda}" == "xpu" ]]; then
+    export VLLM_TARGET_DEVICE=xpu
+    export NIXL_BUFFER_DEVICE=xpu
+else
+    export NIXL_BUFFER_DEVICE=cuda
+fi
+
 # Parse command line arguments
 # All extra arguments are passed through to the PD worker's dynamo.vllm
 # (which routes them to Dynamo or vLLM as appropriate).
@@ -91,9 +100,18 @@ else
     DYN_PD_GPU_MEM=${DYN_PD_GPU_MEM:-0.9}
 fi
 
+# Set device environment variable prefix based on device type
+if [[ "${DYN_DEVICE:-cuda}" == "xpu" ]]; then
+    DYN_ENCODE_WORKER_DEVICES="ZE_AFFINITY_MASK=$DYN_ENCODE_WORKER_GPU"
+    DYN_PD_WORKER_DEVICES="ZE_AFFINITY_MASK=$DYN_PD_WORKER_GPU"
+else
+    DYN_ENCODE_WORKER_DEVICES="CUDA_VISIBLE_DEVICES=$DYN_ENCODE_WORKER_GPU"
+    DYN_PD_WORKER_DEVICES="CUDA_VISIBLE_DEVICES=$DYN_PD_WORKER_GPU"
+fi
+
 # Start encode worker
 echo "Starting encode worker on GPU $DYN_ENCODE_WORKER_GPU (GPU mem: $DYN_ENCODE_GPU_MEM)..."
-CUDA_VISIBLE_DEVICES=$DYN_ENCODE_WORKER_GPU \
+env "$DYN_ENCODE_WORKER_DEVICES" \
 python -m dynamo.vllm \
   --multimodal-encode-worker \
   --enable-multimodal \
@@ -103,7 +121,7 @@ python -m dynamo.vllm \
 
 # Start PD worker (aggregated prefill+decode, routes to encoder for embeddings)
 echo "Starting PD worker on GPU $DYN_PD_WORKER_GPU (GPU mem: $DYN_PD_GPU_MEM)..."
-CUDA_VISIBLE_DEVICES=$DYN_PD_WORKER_GPU \
+env "$DYN_PD_WORKER_DEVICES" \
 python -m dynamo.vllm \
   --route-to-encoder \
   --enable-multimodal \

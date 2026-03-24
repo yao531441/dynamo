@@ -11,6 +11,15 @@ source "$SCRIPT_DIR/../../../common/launch_utils.sh"
 # Default values
 MODEL_NAME="llava-hf/llava-1.5-7b-hf"
 
+# Device selection: supports CUDA (CUDA_VISIBLE_DEVICES) and XPU (ZE_AFFINITY_MASK)
+# Set DYN_DEVICE=xpu to use Intel XPU device selection
+if [[ "${DYN_DEVICE:-cuda}" == "xpu" ]]; then
+    export VLLM_TARGET_DEVICE=xpu
+    export NIXL_BUFFER_DEVICE=xpu
+else
+    export NIXL_BUFFER_DEVICE=cuda
+fi
+
 # --single-gpu: Packs all 3 workers (encode, prefill, decode) onto a single GPU.
 # This is intended for functional testing with small models (e.g. 2B) where CI
 # only has 1 GPU available. It reduces performance by:
@@ -82,6 +91,17 @@ DYN_ENCODE_WORKER_GPU=${DYN_ENCODE_WORKER_GPU:-0}
 DYN_PREFILL_WORKER_GPU=${DYN_PREFILL_WORKER_GPU:-1}
 DYN_DECODE_WORKER_GPU=${DYN_DECODE_WORKER_GPU:-2}
 
+# Set device environment variable prefix based on device type
+if [[ "${DYN_DEVICE:-cuda}" == "xpu" ]]; then
+    DYN_ENCODE_WORKER_DEVICES="ZE_AFFINITY_MASK=$DYN_ENCODE_WORKER_GPU"
+    DYN_PREFILL_WORKER_DEVICES="ZE_AFFINITY_MASK=$DYN_PREFILL_WORKER_GPU"
+    DYN_DECODE_WORKER_DEVICES="ZE_AFFINITY_MASK=$DYN_DECODE_WORKER_GPU"
+else
+    DYN_ENCODE_WORKER_DEVICES="CUDA_VISIBLE_DEVICES=$DYN_ENCODE_WORKER_GPU"
+    DYN_PREFILL_WORKER_DEVICES="CUDA_VISIBLE_DEVICES=$DYN_PREFILL_WORKER_GPU"
+    DYN_DECODE_WORKER_DEVICES="CUDA_VISIBLE_DEVICES=$DYN_DECODE_WORKER_GPU"
+fi
+
 # GPU memory utilization for workers.
 # NOTE: --kv-cache-memory-bytes (set below for P/D workers) overrides
 # --gpu-memory-utilization for KV cache sizing. Per vLLM CacheConfig:
@@ -110,17 +130,17 @@ fi
 
 # Start encode worker
 echo "Starting encode worker on GPU $DYN_ENCODE_WORKER_GPU (GPU mem: $DYN_ENCODE_GPU_MEM)..."
-VLLM_NIXL_SIDE_CHANNEL_PORT=20097 CUDA_VISIBLE_DEVICES=$DYN_ENCODE_WORKER_GPU python -m dynamo.vllm --multimodal-encode-worker --enable-multimodal --model $MODEL_NAME --gpu-memory-utilization $DYN_ENCODE_GPU_MEM $EXTRA_ARGS --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20080"}' &
+VLLM_NIXL_SIDE_CHANNEL_PORT=20097 env "$DYN_ENCODE_WORKER_DEVICES" python -m dynamo.vllm --multimodal-encode-worker --enable-multimodal --model $MODEL_NAME --gpu-memory-utilization $DYN_ENCODE_GPU_MEM $EXTRA_ARGS --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20080"}' &
 
 # Start prefill worker (also handles encode routing via --route-to-encoder)
 echo "Starting prefill worker on GPU $DYN_PREFILL_WORKER_GPU (GPU mem: $DYN_PREFILL_GPU_MEM)..."
 VLLM_NIXL_SIDE_CHANNEL_PORT=20098 \
-CUDA_VISIBLE_DEVICES=$DYN_PREFILL_WORKER_GPU python -m dynamo.vllm --route-to-encoder --disaggregation-mode prefill --enable-multimodal --enable-mm-embeds --model $MODEL_NAME --gpu-memory-utilization $DYN_PREFILL_GPU_MEM $EXTRA_ARGS $PD_EXTRA_ARGS --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20081"}' &
+env "$DYN_PREFILL_WORKER_DEVICES" python -m dynamo.vllm --route-to-encoder --disaggregation-mode prefill --enable-multimodal --enable-mm-embeds --model $MODEL_NAME --gpu-memory-utilization $DYN_PREFILL_GPU_MEM $EXTRA_ARGS $PD_EXTRA_ARGS --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20081"}' &
 
 # Start decode worker
 echo "Starting decode worker on GPU $DYN_DECODE_WORKER_GPU (GPU mem: $DYN_DECODE_GPU_MEM)..."
 VLLM_NIXL_SIDE_CHANNEL_PORT=20099 \
-CUDA_VISIBLE_DEVICES=$DYN_DECODE_WORKER_GPU python -m dynamo.vllm  --disaggregation-mode decode --enable-multimodal --enable-mm-embeds --model $MODEL_NAME --gpu-memory-utilization $DYN_DECODE_GPU_MEM $EXTRA_ARGS $PD_EXTRA_ARGS --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20082"}' &
+env "$DYN_DECODE_WORKER_DEVICES" python -m dynamo.vllm  --disaggregation-mode decode --enable-multimodal --enable-mm-embeds --model $MODEL_NAME --gpu-memory-utilization $DYN_DECODE_GPU_MEM $EXTRA_ARGS $PD_EXTRA_ARGS --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20082"}' &
 
 echo "=================================================="
 echo "All components started. Waiting for initialization..."

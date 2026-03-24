@@ -22,6 +22,17 @@ source "$SCRIPT_DIR/../../../common/gpu_utils.sh"
 
 MODEL="Qwen/Qwen3-0.6B"
 
+# Device selection: supports CUDA (CUDA_VISIBLE_DEVICES) and XPU (ZE_AFFINITY_MASK)
+# Set DYN_DEVICE=xpu to use Intel XPU device selection
+if [[ "${DYN_DEVICE:-cuda}" == "xpu" ]]; then
+    DYN_VISIBLE_DEVICES="ZE_AFFINITY_MASK=0"
+    export VLLM_TARGET_DEVICE=xpu
+    export NIXL_BUFFER_DEVICE=xpu
+else
+    DYN_VISIBLE_DEVICES="CUDA_VISIBLE_DEVICES=0"
+    export NIXL_BUFFER_DEVICE=cuda
+fi
+
 # ---- Tunable (override via env vars) ----
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 MAX_CONCURRENT_SEQS="${MAX_CONCURRENT_SEQS:-2}"
@@ -43,12 +54,12 @@ python3 -m dynamo.frontend &
 # For disaggregated deployments we standardize on DYN_SYSTEM_PORT1/2 instead of
 # *_PREFILL/*_DECODE env names so test harnesses can set one simple pair.
 DYN_SYSTEM_PORT=${DYN_SYSTEM_PORT1:-8081} \
-CUDA_VISIBLE_DEVICES=0 \
+env "$DYN_VISIBLE_DEVICES" \
 python3 -m dynamo.vllm \
   --model "$MODEL" \
   --enforce-eager \
   --disaggregation-mode decode \
-  --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' \
+  --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" \
   --gpu-memory-utilization "${GPU_MEM_FRACTION}" \
   --max-model-len "$MAX_MODEL_LEN" &
 
@@ -64,12 +75,12 @@ sleep 10
 # run prefill worker with metrics on port 8082
 DYN_SYSTEM_PORT=${DYN_SYSTEM_PORT2:-8082} \
 VLLM_NIXL_SIDE_CHANNEL_PORT=20097 \
-CUDA_VISIBLE_DEVICES=0 \
+env "$DYN_VISIBLE_DEVICES" \
 python3 -m dynamo.vllm \
   --model "$MODEL" \
   --enforce-eager \
   --disaggregation-mode prefill \
-  --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' \
+  --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" \
   --gpu-memory-utilization "${GPU_MEM_FRACTION}" \
   --max-model-len "$MAX_MODEL_LEN" \
   --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20081","enable_kv_cache_events":true}' &

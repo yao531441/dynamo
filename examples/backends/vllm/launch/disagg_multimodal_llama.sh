@@ -9,6 +9,15 @@ source "$SCRIPT_DIR/../../../common/launch_utils.sh"
 # Default values
 HEAD_NODE=0
 MODEL_NAME="meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
+
+# Device selection: supports CUDA (CUDA_VISIBLE_DEVICES) and XPU (ZE_AFFINITY_MASK)
+# Set DYN_DEVICE=xpu to use Intel XPU device selection
+if [[ "${DYN_DEVICE:-cuda}" == "xpu" ]]; then
+    export VLLM_TARGET_DEVICE=xpu
+    export NIXL_BUFFER_DEVICE=xpu
+else
+    export NIXL_BUFFER_DEVICE=cuda
+fi
 EXTRA_ARGS=()
 
 # Parse command line arguments
@@ -73,30 +82,28 @@ if [[ $HEAD_NODE -eq 1 ]]; then
     python -m dynamo.frontend &
 
     # run processor (CPU-only to avoid competing for GPU memory with workers)
-    CUDA_VISIBLE_DEVICES="" \
+    CUDA_VISIBLE_DEVICES="" ZE_AFFINITY_MASK="" VLLM_TARGET_DEVICE=cpu \
     python -m dynamo.vllm --route-to-encoder --enable-multimodal --model $MODEL_NAME &
 
     # Prefill worker handles prompt processing and image encoding
     # Uses all 8 GPUs for tensor-parallel
-    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
     VLLM_NIXL_SIDE_CHANNEL_PORT=20097 \
     python -m dynamo.vllm \
         --enable-multimodal \
         --model $MODEL_NAME \
         --disaggregation-mode prefill \
-        --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' \
+        --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" \
         $MODEL_SPECIFIC_ARGS \
         --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20080"}' \
         "${EXTRA_ARGS[@]}" &
 else
     # run decode worker on non-head node
     # Uses all 8 GPUs for tensor-parallel
-    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
     VLLM_NIXL_SIDE_CHANNEL_PORT=20098 \
     python -m dynamo.vllm \
         --enable-multimodal \
         --model $MODEL_NAME \
-        --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' \
+        --kv-transfer-config "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"${NIXL_BUFFER_DEVICE}\"}" \
         $MODEL_SPECIFIC_ARGS \
         --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20081"}' \
         "${EXTRA_ARGS[@]}" &
