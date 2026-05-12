@@ -38,7 +38,6 @@ import (
 
 const (
 	defaultDCGMEndpointTemplate = "http://{POD_IP}:9400/metrics"
-	defaultIntelMetricsEndpoint = "http://{POD_IP}:9966/metrics"
 	defaultXPUMDMetricsEndpoint = "http://{POD_IP}:8080/metrics"
 	// NVIDIA GPU Feature Discovery (GFD) label keys
 	LabelGPUCount   = "nvidia.com/gpu.count"
@@ -51,7 +50,6 @@ const (
 	LabelValueNvidiaNetworkOperator = "nvidia-network-operator"
 	LabelValueDCGMExporter          = "dcgm-exporter"
 	LabelValueGPUOperator           = "gpu-operator"
-	LabelValueXPUSMIExporter        = "xpu-smi-exporter"
 	LabelValueXPUMD                 = "xpumd"
 	LabelValueIntelXPUManager       = "intel-xpumanager"
 	GPUOperatorNamespace            = "gpu-operator"
@@ -205,9 +203,9 @@ var prometheusDiscoverySources = []metricsDiscoverySource{
 		buildEndpoints:   buildDCGMEndpoints,
 	},
 	{
-		source:           "intel-xpu",
-		missingPodsError: "no Intel XPU exporter pods found",
-		listErrorPrefix:  "listing Intel XPU exporter pods failed",
+		source:           "intel-xpumd",
+		missingPodsError: "no Intel XPUMD pods found",
+		listErrorPrefix:  "listing Intel XPUMD pods failed",
 		listPods:         listIntelXPUExporterPods,
 		buildEndpoints:   buildIntelMetricsEndpoints,
 	},
@@ -492,10 +490,7 @@ func buildIntelMetricsEndpoints(podIP string) []string {
 	if template != "" {
 		return []string{strings.ReplaceAll(template, "{POD_IP}", podIP)}
 	}
-	return []string{
-		strings.ReplaceAll(defaultIntelMetricsEndpoint, "{POD_IP}", podIP),
-		strings.ReplaceAll(defaultXPUMDMetricsEndpoint, "{POD_IP}", podIP),
-	}
+	return []string{strings.ReplaceAll(defaultXPUMDMetricsEndpoint, "{POD_IP}", podIP)}
 }
 
 func listDCGMExporterPods(ctx context.Context, k8sClient client.Reader) ([]corev1.Pod, error) {
@@ -535,11 +530,10 @@ func listIntelXPUExporterPods(ctx context.Context, k8sClient client.Reader) ([]c
 	var result []corev1.Pod
 	seen := make(map[string]struct{})
 	selectors := []client.MatchingLabels{
-		{LabelApp: LabelValueXPUSMIExporter},
 		{LabelApp: LabelValueXPUMD},
 		{LabelApp: LabelValueIntelXPUManager},
-		{LabelAppKubernetesName: LabelValueXPUSMIExporter},
 		{LabelAppKubernetesName: LabelValueXPUMD},
+		{LabelAppKubernetesName: LabelValueIntelXPUManager},
 	}
 	var lastErr error
 	for _, selector := range selectors {
@@ -563,7 +557,7 @@ func listIntelXPUExporterPods(ctx context.Context, k8sClient client.Reader) ([]c
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, fmt.Errorf("no Intel XPU exporter pods found")
+	return nil, fmt.Errorf("no Intel XPUMD pods found")
 }
 
 // listGPUOperatorRunningPods lists GPU Operator pods in the given namespace

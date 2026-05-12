@@ -28,7 +28,7 @@ import (
 )
 
 func hasIntelMetricFamilies(families map[string]*dto.MetricFamily) bool {
-	_, ok := getMetricFamily(families, "xpu_device_info", "hw_gpu_info", "hw.gpu.info")
+	_, ok := getMetricFamily(families, "hw_gpu_info", "hw.gpu.info")
 	return ok
 }
 
@@ -188,9 +188,9 @@ func parseIntelMetrics(ctx context.Context, families map[string]*dto.MetricFamil
 
 func parseIntelAcceleratorMetrics(ctx context.Context, families map[string]*dto.MetricFamily) (*DiscoveredAcceleratorInfo, error) {
 	logger := log.FromContext(ctx)
-	infoFamily, ok := getMetricFamily(families, "xpu_device_info", "hw_gpu_info", "hw.gpu.info")
+	infoFamily, ok := getMetricFamily(families, "hw_gpu_info", "hw.gpu.info")
 	if !ok || len(infoFamily.Metric) == 0 {
-		return nil, fmt.Errorf("no XPU devices detected from Intel exporter metrics")
+		return nil, fmt.Errorf("no XPU devices detected from XPUMD metrics")
 	}
 
 	nodeName := ""
@@ -198,10 +198,8 @@ func parseIntelAcceleratorMetrics(ctx context.Context, families map[string]*dto.
 	pciDeviceID := ""
 	maxVRAMMiB := 0
 	deviceIDs := make(map[string]struct{})
-	deviceCount := 0
-
 	memoryByDevice := map[string]int{}
-	if mf, ok := getMetricFamily(families, "xpu_memory_total_bytes", "hw_memory_size_bytes", "hw_memory_size", "hw.memory.size"); ok {
+	if mf, ok := getMetricFamily(families, "hw_memory_size_bytes", "hw_memory_size", "hw.memory.size"); ok {
 		for _, m := range mf.Metric {
 			deviceID := getMetricLabel(m, "device_id", "hw_id", "hw.id", "pci_bdf", "pci.bdf")
 			if deviceID == "" {
@@ -219,19 +217,6 @@ func parseIntelAcceleratorMetrics(ctx context.Context, families map[string]*dto.
 			if nodeName == "" {
 				nodeName = getMetricLabel(m, "node_name")
 			}
-		}
-	}
-	if mf, ok := getMetricFamily(families, "xpu_device_count"); ok {
-		for _, m := range mf.Metric {
-			value, ok := getMetricFloatValue(m)
-			if !ok {
-				continue
-			}
-			deviceCount = int(math.Round(value))
-			if nodeName == "" {
-				nodeName = getMetricLabel(m, "node_name")
-			}
-			break
 		}
 	}
 
@@ -255,11 +240,9 @@ func parseIntelAcceleratorMetrics(ctx context.Context, families map[string]*dto.
 		}
 	}
 
-	if deviceCount <= 0 {
-		deviceCount = len(deviceIDs)
-	}
+	deviceCount := len(deviceIDs)
 	if deviceCount == 0 {
-		return nil, fmt.Errorf("no XPU devices detected from Intel exporter metrics")
+		return nil, fmt.Errorf("no XPU devices detected from XPUMD metrics")
 	}
 
 	system := inferIntelHardwareSystem(model, pciDeviceID, maxVRAMMiB)
