@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: xpumd-direct-test
+  namespace: intel-xpumd
+  labels:
+    app: xpumd
+    app.kubernetes.io/name: xpumd
+spec:
+  restartPolicy: Always
+  containers:
+  - name: xpumd
+    image: ghcr.io/intel/xpumanager/xpumd:v2.0.0-rc.0
+    args:
+    - --config=/etc/xpumd/config.yaml
+    ports:
+    - containerPort: 8080
+      name: xpumd-metrics
+      protocol: TCP
+    securityContext:
+      privileged: true
+      runAsUser: 0
+      allowPrivilegeEscalation: true
+      capabilities:
+        drop:
+        - ALL
+        add:
+        - SYS_ADMIN
+    volumeMounts:
+    - name: xpumd-config
+      mountPath: /etc/xpumd
+      readOnly: true
+    - name: dri
+      mountPath: /dev/dri
+  volumes:
+  - name: xpumd-config
+    configMap:
+      name: xpumd-config
+  - name: dri
+    hostPath:
+      path: /dev/dri
+      type: Directory

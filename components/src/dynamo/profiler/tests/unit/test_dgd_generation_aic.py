@@ -17,6 +17,7 @@ try:
         _inject_mocker_aic_args,
         build_aic_interpolation_spec,
         enable_vllm_benchmark_mode,
+        enable_vllm_xpu_runtime,
     )
     from dynamo.profiler.utils.dgdr_v1beta1_types import (
         DynamoGraphDeploymentRequestSpec,
@@ -435,3 +436,62 @@ class TestEnableVllmBenchmarkMode:
         assert (
             _benchmark_mode(cfg["spec"]["services"]["VllmPrefillWorker"]) == "prefill"
         )
+
+
+class TestEnableVllmXpuRuntime:
+    def test_sets_xpu_env_and_gpu_type_on_workers(self):
+        cfg = {
+            "spec": {
+                "services": {
+                    "Frontend": {},
+                    "VllmPrefillWorker": {},
+                    "VllmDecodeWorker": {},
+                }
+            }
+        }
+        enable_vllm_xpu_runtime(cfg)
+
+        for name in ("VllmPrefillWorker", "VllmDecodeWorker"):
+            limits = cfg["spec"]["services"][name]["resources"]["limits"]
+            assert limits["gpuType"] == "gpu.intel.com/xe"
+            env = cfg["spec"]["services"][name]["extraPodSpec"]["mainContainer"]["env"]
+            assert {"name": "VLLM_TARGET_DEVICE", "value": "xpu"} in env
+
+    def test_updates_worker_kv_transfer_config(self):
+        cfg = {
+            "spec": {
+                "services": {
+                    "VllmPrefillWorker": {
+                        "extraPodSpec": {
+                            "mainContainer": {
+                                "args": [
+                                    "--model",
+                                    "Qwen/Qwen3-0.6B",
+                                    "--kv-transfer-config",
+                                    '{"kv_connector":"NixlConnector","kv_role":"kv_both"}',
+                                ]
+                            }
+                        }
+                    },
+                    "VllmDecodeWorker": {
+                        "extraPodSpec": {
+                            "mainContainer": {
+                                "args": [
+                                    "--model",
+                                    "Qwen/Qwen3-0.6B",
+                                    "--kv-transfer-config",
+                                    '{"kv_connector":"NixlConnector","kv_role":"kv_both"}',
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        enable_vllm_xpu_runtime(cfg)
+
+        for name in ("VllmPrefillWorker", "VllmDecodeWorker"):
+            args = cfg["spec"]["services"][name]["extraPodSpec"]["mainContainer"]["args"]
+            kv_cfg = args[args.index("--kv-transfer-config") + 1]
+            assert '"kv_buffer_device":"xpu"' in kv_cfg

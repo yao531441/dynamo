@@ -175,7 +175,7 @@ const (
 )
 
 // GPUSKUType is the AIC hardware system identifier for a supported GPU.
-// +kubebuilder:validation:Enum=gb200_sxm;b200_sxm;h200_sxm;h100_sxm;h100_pcie;a100_sxm;a100_pcie;l40s;l40;l4;v100_sxm;v100_pcie;t4;mi200;mi300
+// +kubebuilder:validation:Enum=gb200_sxm;b200_sxm;h200_sxm;h100_sxm;h100_pcie;a100_sxm;a100_pcie;l40s;l40;l4;v100_sxm;v100_pcie;t4;mi200;mi300;b60
 type GPUSKUType string
 
 const (
@@ -200,6 +200,8 @@ const (
 	// --- AMD ---
 	GPUSKUTypeMI200 GPUSKUType = "mi200"
 	GPUSKUTypeMI300 GPUSKUType = "mi300"
+	// --- Intel ---
+	GPUSKUTypeB60 GPUSKUType = "b60"
 )
 
 // BackendType specifies the inference backend.
@@ -346,7 +348,7 @@ type HardwareSpec struct {
 	// choose which GPU type to use. Discovery and totalGpus are then
 	// restricted to nodes matching this SKU.
 	// +optional
-	// +kubebuilder:validation:Enum=gb200_sxm;b200_sxm;h200_sxm;h100_sxm;h100_pcie;a100_sxm;a100_pcie;l40s;l40;l4;v100_sxm;v100_pcie;t4;mi200;mi300
+	// +kubebuilder:validation:Enum=gb200_sxm;b200_sxm;h200_sxm;h100_sxm;h100_pcie;a100_sxm;a100_pcie;l40s;l40;l4;v100_sxm;v100_pcie;t4;mi200;mi300;b60
 	GPUSKU GPUSKUType `json:"gpuSku,omitempty"`
 
 	// VRAMMB is the VRAM per GPU in MiB.

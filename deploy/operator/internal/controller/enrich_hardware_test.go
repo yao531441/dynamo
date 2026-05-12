@@ -113,6 +113,11 @@ func TestEnrichHardwareFromDiscovery(t *testing.T) {
 			wantGPUSKU:    "FutureGPU-X1000", wantVRAM: 65536, wantGPUsNode: 4, wantTotalGPUs: 4,
 		},
 		{
+			name:          "nothing set, Intel B60 discovered",
+			discoveredGPU: &gpupkg.GPUInfo{NodeName: "xpu-node", GPUsPerNode: 3, Model: "Intel(R) Graphics [0xe211]", VRAMPerGPU: 24480, System: "b60"},
+			wantGPUSKU:    "b60", wantVRAM: 24480, wantGPUsNode: 3, wantTotalGPUs: 3,
+		},
+		{
 			name: "only totalGpus missing, discovery fills it",
 			hardware: &nvidiacomv1beta1.HardwareSpec{
 				GPUSKU: "b200_sxm", VRAMMB: ptr.To(141312.0), NumGPUsPerNode: ptr.To(int32(8)),

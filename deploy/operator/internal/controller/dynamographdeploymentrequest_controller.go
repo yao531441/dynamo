@@ -1053,27 +1053,27 @@ func (r *DynamoGraphDeploymentRequestReconciler) validateGPUHardwareInfo(ctx con
 		return nil
 	}
 
-	// DCGM exporter is a cluster-level Service — reachable from any namespace.
-	if r.GPUDiscovery != nil {
-		if _, err := r.GPUDiscovery.DiscoverGPUsFromDCGM(ctx, r.APIReader, r.GPUDiscoveryCache); err == nil {
-			return nil
-		} else {
-			logger.Info("DCGM discovery unavailable", "error", err.Error())
-		}
+	enableNodeFallback := true
+	if r.Config != nil {
+		enableNodeFallback = ptr.Deref(r.Config.GPU.DiscoveryEnabled, true)
 	}
 
-	// Node-label fallback
-	if ptr.Deref(r.Config.GPU.DiscoveryEnabled, true) {
-		if _, err := gpu.DiscoverGPUs(ctx, r.APIReader); err == nil {
-			return nil
-		} else {
-			logger.Info("Node-label discovery unavailable", "error", err.Error())
-		}
+	if _, err := gpu.DiscoverGPUHardware(
+		ctx,
+		r.APIReader,
+		r.GPUDiscovery,
+		r.GPUDiscoveryCache,
+		"",
+		enableNodeFallback,
+	); err == nil {
+		return nil
+	} else {
+		logger.Info("GPU auto-discovery unavailable", "error", err.Error())
 	}
 
 	return fmt.Errorf(
 		"GPU hardware info required but auto-discovery failed. " +
-			"Verify DCGM exporter is reachable from the operator's namespace, " +
+			"Verify a supported GPU metrics exporter is reachable from the operator's namespace, " +
 			"or set spec.hardware.{gpuSku,vramMb,numGpusPerNode} explicitly.")
 }
 
@@ -1441,8 +1441,9 @@ func marshalDGDRSpec(dgdr *nvidiacomv1beta1.DynamoGraphDeploymentRequest) (strin
 // because discovery was gated on !hasManualConfig, yet the enrichment code below still
 // dereferenced gpuInfo for whichever fields were still nil.
 //
-// DCGM is tried first; node-label discovery (DiscoverGPUs) is used as a fallback to support
-// environments such as vCluster where DCGM sockets are exclusive to the host cluster.
+// Metrics-based discovery is tried first; node-label discovery is used as a
+// fallback to support environments such as vCluster where host-cluster metrics
+// endpoints are not directly reachable.
 func (r *DynamoGraphDeploymentRequestReconciler) enrichHardwareFromDiscovery(ctx context.Context, dgdr *nvidiacomv1beta1.DynamoGraphDeploymentRequest) error {
 	if dgdr.Spec.Hardware == nil {
 		dgdr.Spec.Hardware = &nvidiacomv1beta1.HardwareSpec{}
@@ -1454,30 +1455,25 @@ func (r *DynamoGraphDeploymentRequestReconciler) enrichHardwareFromDiscovery(ctx
 	}
 
 	logger := log.FromContext(ctx)
+	enableNodeFallback := true
+	if r.Config != nil {
+		enableNodeFallback = ptr.Deref(r.Config.GPU.DiscoveryEnabled, true)
+	}
 
-	var gpuInfo *gpu.GPUInfo
 	logger.Info("Attempting GPU discovery for profiling job")
-	var discoveredInfo *gpu.GPUInfo
-	var err error
-	if r.GPUDiscovery != nil {
-		discoveredInfo, err = r.GPUDiscovery.DiscoverGPUsFromDCGMFiltered(ctx, r.APIReader, r.GPUDiscoveryCache, hw.GPUSKU)
-		if err != nil {
-			reason := GetGPUDiscoveryFailureReason(err)
-			logger.Info("DCGM discovery failed, falling back to node-label discovery",
-				"reason", reason, "error", err.Error())
-			if !ptr.Deref(r.Config.GPU.DiscoveryEnabled, true) {
-				return fmt.Errorf("auto-discovery failed: %w", err)
-			}
-		}
+	gpuInfo, err := gpu.DiscoverGPUHardware(
+		ctx,
+		r.APIReader,
+		r.GPUDiscovery,
+		r.GPUDiscoveryCache,
+		hw.GPUSKU,
+		enableNodeFallback,
+	)
+	if err != nil {
+		reason := GetGPUDiscoveryFailureReason(err)
+		logger.Info("GPU discovery failed", "reason", reason, "error", err.Error())
+		return fmt.Errorf("auto-discovery failed: %w", err)
 	}
-	if discoveredInfo == nil {
-		discoveredInfo, err = gpu.DiscoverGPUs(ctx, r.APIReader)
-		if err != nil {
-			logger.Info("Node-label discovery also failed", "error", err.Error())
-			return fmt.Errorf("auto-discovery failed: %w", err)
-		}
-	}
-	gpuInfo = discoveredInfo
 	if gpuInfo != nil {
 		logger.Info("GPU discovery completed successfully",
 			"gpusPerNode", gpuInfo.GPUsPerNode,

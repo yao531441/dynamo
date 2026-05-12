@@ -28,7 +28,6 @@ import (
 	"time"
 
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +38,8 @@ import (
 
 const (
 	defaultDCGMEndpointTemplate = "http://{POD_IP}:9400/metrics"
+	defaultIntelMetricsEndpoint = "http://{POD_IP}:9966/metrics"
+	defaultXPUMDMetricsEndpoint = "http://{POD_IP}:8080/metrics"
 	// NVIDIA GPU Feature Discovery (GFD) label keys
 	LabelGPUCount   = "nvidia.com/gpu.count"
 	LabelGPUProduct = "nvidia.com/gpu.product"
@@ -50,6 +51,9 @@ const (
 	LabelValueNvidiaNetworkOperator = "nvidia-network-operator"
 	LabelValueDCGMExporter          = "dcgm-exporter"
 	LabelValueGPUOperator           = "gpu-operator"
+	LabelValueXPUSMIExporter        = "xpu-smi-exporter"
+	LabelValueXPUMD                 = "xpumd"
+	LabelValueIntelXPUManager       = "intel-xpumanager"
 	GPUOperatorNamespace            = "gpu-operator"
 	requestTimeout                  = 5 * time.Second
 	dialTimeout                     = 3 * time.Second
@@ -93,6 +97,7 @@ const (
 	tokenMI300  = "MI300"
 	tokenMI250  = "MI250"
 	tokenMI200  = "MI200"
+	tokenE211   = "E211"
 	LabelNVLink = "nvlink"
 )
 
@@ -143,6 +148,8 @@ var gpuRules = []gpuRule{
 	{token: tokenMI300, singleSKU: nvidiacomv1beta1.GPUSKUTypeMI300},
 	{token: tokenMI250, singleSKU: nvidiacomv1beta1.GPUSKUTypeMI200},
 	{token: tokenMI200, singleSKU: nvidiacomv1beta1.GPUSKUTypeMI200},
+	// Intel
+	{token: tokenE211, singleSKU: nvidiacomv1beta1.GPUSKUTypeB60},
 }
 
 // GPUInfo contains discovered GPU configuration from cluster nodes
@@ -179,6 +186,31 @@ type GPUDiscoveryCache struct {
 
 type GPUDiscovery struct {
 	Scraper ScrapeMetricsFunc
+}
+
+type metricsDiscoverySource struct {
+	source           string
+	missingPodsError string
+	listErrorPrefix  string
+	listPods         func(context.Context, client.Reader) ([]corev1.Pod, error)
+	buildEndpoints   func(string) []string
+}
+
+var prometheusDiscoverySources = []metricsDiscoverySource{
+	{
+		source:           "dcgm",
+		missingPodsError: "no DCGM exporter pods found",
+		listErrorPrefix:  "listing DCGM exporter pods failed",
+		listPods:         listDCGMExporterPods,
+		buildEndpoints:   buildDCGMEndpoints,
+	},
+	{
+		source:           "intel-xpu",
+		missingPodsError: "no Intel XPU exporter pods found",
+		listErrorPrefix:  "listing Intel XPU exporter pods failed",
+		listPods:         listIntelXPUExporterPods,
+		buildEndpoints:   buildIntelMetricsEndpoints,
+	},
 }
 
 func NewGPUDiscovery(scraper ScrapeMetricsFunc) *GPUDiscovery {
@@ -234,101 +266,143 @@ func (g *GPUDiscovery) DiscoverGPUsFromDCGM(ctx context.Context, k8sClient clien
 	return g.DiscoverGPUsFromDCGMFiltered(ctx, k8sClient, cache, "")
 }
 
-// DiscoverGPUsFromDCGMFiltered discovers GPU information by scraping metrics
-// directly from DCGM exporter pods running in the cluster.
-//
-// When filterSKU is non-empty, only nodes whose inferred SKU matches are
-// considered. When empty, the best node is selected first (highest GPU count,
-// then VRAM) and then only nodes with the same SKU are counted.
-//
-// The function performs the following:
-//
-//  1. Returns cached GPU information if still valid (keyed by filterSKU).
-//  2. Lists DCGM exporter pods across all namespaces using supported labels.
-//  3. If no pods are found, attempts to find if GPU operator is installed and DCGM is enabled via Helm.
-//  4. Warns user appropriately.
-//  5. Scrapes each running pods metrics endpoint (http://<podIP>:9400/metrics).
-//  6. Selects the "best" GPU node (filtered by SKU when set) based on:
-//     - Highest GPU count
-//     - Highest VRAM per GPU (tie-breaker)
-//  7. Counts only nodes matching the selected SKU for NodesWithGPUs.
-//  8. Caches the result per SKU for a short duration to avoid repeated scraping.
-//
-// Behavior Notes:
-//
-//   - Scrapes pods directly instead of using a Service ClusterIP to avoid
-//     load-balancing ambiguity in multi-node clusters.
-//   - If at least one pod is successfully scraped, partial failures are tolerated.
-//   - If all pods fail to scrape, an aggregated error is returned.
-//   - Assumes DCGM exporter runs as a DaemonSet (one pod per GPU node).
-//
-// Returns:
-//   - *GPUInfo for the selected node
-//   - error if no GPU data can be retrieved
+// DiscoverGPUsFromDCGMFiltered retains the historical name used by the
+// controller and tests, but the implementation now covers all supported
+// Prometheus-based discovery sources, including Intel exporters.
 func (g *GPUDiscovery) DiscoverGPUsFromDCGMFiltered(ctx context.Context, k8sClient client.Reader, cache *GPUDiscoveryCache, filterSKU nvidiacomv1beta1.GPUSKUType) (*GPUInfo, error) {
+	return g.discoverFromMetricsSources(ctx, k8sClient, cache, filterSKU)
+}
+
+// DiscoverGPUHardware is the controller-facing discovery entrypoint. It first
+// tries Prometheus-based discovery sources and optionally falls back to
+// node-label discovery when enabled.
+func DiscoverGPUHardware(
+	ctx context.Context,
+	k8sClient client.Reader,
+	metricsDiscovery *GPUDiscovery,
+	cache *GPUDiscoveryCache,
+	filterSKU nvidiacomv1beta1.GPUSKUType,
+	enableNodeFallback bool,
+) (*GPUInfo, error) {
+	var metricsErr error
+	if metricsDiscovery != nil {
+		info, err := metricsDiscovery.discoverFromMetricsSources(ctx, k8sClient, cache, filterSKU)
+		if err == nil {
+			return info, nil
+		}
+		metricsErr = err
+	} else {
+		metricsErr = fmt.Errorf("metrics discovery is not configured")
+	}
+
+	if !enableNodeFallback {
+		return nil, metricsErr
+	}
+
+	info, err := DiscoverGPUs(ctx, k8sClient)
+	if err == nil {
+		return info, nil
+	}
+	return nil, fmt.Errorf("metrics discovery failed: %v; node-label discovery failed: %w", metricsErr, err)
+}
+
+func (g *GPUDiscovery) discoverFromMetricsSources(ctx context.Context, k8sClient client.Reader, cache *GPUDiscoveryCache, filterSKU nvidiacomv1beta1.GPUSKUType) (*GPUInfo, error) {
 	if cache != nil {
 		if cached, ok := cache.Get(filterSKU); ok {
 			return cached, nil
 		}
 	}
 
-	// List DCGM exporter pods
-	dcgmPods, err := listDCGMExporterPods(ctx, k8sClient)
-	if err != nil && !strings.Contains(err.Error(), "no DCGM exporter pods found") {
-		return nil, fmt.Errorf("listing DCGM exporter pods failed: %w", err)
-	}
-	// If no pods found
-	if len(dcgmPods) == 0 {
-		gpuPods, err := listGPUOperatorRunningPods(ctx, k8sClient)
-		if len(gpuPods) > 0 {
-			return nil, fmt.Errorf("DCGM is not enabled in the GPU Operator (check GPU Operator configuration and permissions)")
-		}
-		return nil, err
+	if g == nil || g.Scraper == nil {
+		return nil, fmt.Errorf("metrics discovery is not configured")
 	}
 
-	// Scrape each running pod and collect per-node GPU info.
+	var sourceErrors []string
+	for _, source := range prometheusDiscoverySources {
+		pods, listErr := source.listPods(ctx, k8sClient)
+		if listErr != nil && !strings.Contains(listErr.Error(), source.missingPodsError) {
+			return nil, fmt.Errorf("%s: %w", source.listErrorPrefix, listErr)
+		}
+		if len(pods) == 0 {
+			continue
+		}
+
+		info, discoverErr := g.discoverPrometheusPods(ctx, k8sClient, pods, source.buildEndpoints, filterSKU, source.source)
+		if discoverErr == nil {
+			if cache != nil {
+				cache.Set(filterSKU, info, 60*time.Second)
+			}
+			return info, nil
+		}
+		sourceErrors = append(sourceErrors, fmt.Sprintf("%s discovery failed: %v", source.source, discoverErr))
+	}
+
+	if len(sourceErrors) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(sourceErrors, "; "))
+	}
+
+	gpuPods, gpuErr := listGPUOperatorRunningPods(ctx, k8sClient)
+	if len(gpuPods) > 0 {
+		return nil, fmt.Errorf("no GPU metrics exporters found: DCGM is not enabled in the GPU Operator and no Intel XPU exporter pods found")
+	}
+	if gpuErr != nil && !strings.Contains(gpuErr.Error(), "gpu operator is not installed") {
+		return nil, gpuErr
+	}
+	return nil, fmt.Errorf("no GPU metrics exporters found: no DCGM exporter pods found and no Intel XPU exporter pods found")
+}
+
+func (g *GPUDiscovery) discoverPrometheusPods(
+	ctx context.Context,
+	k8sClient client.Reader,
+	pods []corev1.Pod,
+	buildEndpoints func(string) []string,
+	filterSKU nvidiacomv1beta1.GPUSKUType,
+	source string,
+) (*GPUInfo, error) {
 	type nodeInfo struct {
-		info     *GPUInfo
-		sku      nvidiacomv1beta1.GPUSKUType
+		info     *DiscoveredAcceleratorInfo
 		nodeName string
 	}
-	allNodes := make([]nodeInfo, 0, len(dcgmPods))
+	allNodes := make([]nodeInfo, 0, len(pods))
 	var scrapeErrors []error
 
-	for _, pod := range dcgmPods {
+	for _, pod := range pods {
 		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" {
 			continue
 		}
-		endpoint := buildDCGMEndpoint(pod.Status.PodIP)
-		info, err := g.Scraper(ctx, endpoint)
+		endpoints := buildEndpoints(pod.Status.PodIP)
+		scrapedInfo, endpoint, err := g.scrapeAnyEndpoint(ctx, endpoints)
 		if err != nil {
 			scrapeErrors = append(scrapeErrors, fmt.Errorf("pod %s (%s): %w", pod.Name, pod.Status.PodIP, err))
 			continue
 		}
+		info := normalizeScrapedGPUInfo(scrapedInfo)
+		if info.NodeName == "" {
+			info.NodeName = pod.Spec.NodeName
+		}
 
-		allNodes = append(allNodes, nodeInfo{info: info, sku: InferHardwareSystem(info.Model), nodeName: pod.Spec.NodeName})
+		log.FromContext(ctx).V(1).Info("Scraped GPU metrics exporter pod", "source", source, "pod", pod.Name, "endpoint", endpoint, "sku", info.SKU)
+		allNodes = append(allNodes, nodeInfo{info: info, nodeName: pod.Spec.NodeName})
 	}
 
 	if len(allNodes) == 0 {
 		if len(scrapeErrors) > 0 {
-			return nil, fmt.Errorf("failed to scrape any DCGM exporter pod: %v", scrapeErrors)
+			return nil, fmt.Errorf("failed to scrape any %s exporter pod: %v", source, scrapeErrors)
 		}
-		return nil, fmt.Errorf("no GPU metrics could be parsed from any DCGM pod")
+		return nil, fmt.Errorf("no GPU metrics could be parsed from any %s exporter pod", source)
 	}
 
 	// Select best node (only from matching SKU when filtered).
-	var bestNode *GPUInfo
-	var bestSKU nvidiacomv1beta1.GPUSKUType
+	var bestNode *DiscoveredAcceleratorInfo
 	for _, n := range allNodes {
-		if filterSKU != "" && n.sku != filterSKU {
+		if filterSKU != "" && n.info.SKU != filterSKU {
 			continue
 		}
 		if bestNode == nil ||
-			n.info.GPUsPerNode > bestNode.GPUsPerNode ||
-			(n.info.GPUsPerNode == bestNode.GPUsPerNode &&
-				n.info.VRAMPerGPU > bestNode.VRAMPerGPU) {
+			n.info.AcceleratorsPerNode > bestNode.AcceleratorsPerNode ||
+			(n.info.AcceleratorsPerNode == bestNode.AcceleratorsPerNode &&
+				n.info.MemoryPerAcceleratorMiB > bestNode.MemoryPerAcceleratorMiB) {
 			bestNode = n.info
-			bestSKU = n.sku
 		}
 	}
 
@@ -336,18 +410,23 @@ func (g *GPUDiscovery) DiscoverGPUsFromDCGMFiltered(ctx context.Context, k8sClie
 		if filterSKU != "" {
 			return nil, fmt.Errorf("no GPU nodes matching SKU %q found", filterSKU)
 		}
-		return nil, fmt.Errorf("no GPU metrics could be parsed from any DCGM pod")
+		return nil, fmt.Errorf("no GPU metrics could be parsed from any %s exporter pod", source)
 	}
 
 	// Count only nodes with the same SKU as the selected best node,
 	// and detect RDMA on matching nodes only.
 	nodesWithGPUs := 0
+	seenNodes := make(map[string]struct{})
 	var rdmaDetected bool
 	var rdmaType string
 	for _, n := range allNodes {
-		if n.sku != bestSKU {
+		if n.info.SKU != bestNode.SKU {
 			continue
 		}
+		if _, seen := seenNodes[n.nodeName]; seen {
+			continue
+		}
+		seenNodes[n.nodeName] = struct{}{}
 		nodesWithGPUs++
 		if !rdmaDetected {
 			rdma, rType := detectRDMAFromNode(ctx, k8sClient, n.nodeName)
@@ -369,24 +448,56 @@ func (g *GPUDiscovery) DiscoverGPUsFromDCGMFiltered(ctx context.Context, k8sClie
 	if err != nil {
 		cloudProvider = CloudProviderUnknown
 	}
-	bestNode.System = bestSKU
 	bestNode.CloudProvider = cloudProvider
-	bestNode.NodesWithGPUs = nodesWithGPUs
+	bestNode.NodesWithAccelerators = nodesWithGPUs
 	bestNode.RDMAEnabled = rdmaDetected
 	bestNode.RDMAType = rdmaType
 
-	if cache != nil {
-		cache.Set(filterSKU, bestNode, 60*time.Second)
-	}
-	return bestNode, nil
+	return bestNode.toGPUInfo(), nil
 }
-func buildDCGMEndpoint(podIP string) string {
+
+func normalizeScrapedGPUInfo(info *GPUInfo) *DiscoveredAcceleratorInfo {
+	normalized := discoveredAcceleratorInfoFromGPUInfo(info)
+	if normalized == nil {
+		return nil
+	}
+	if normalized.SKU == "" {
+		normalized.SKU = InferHardwareSystem(normalized.Model)
+	}
+	return normalized
+}
+
+func (g *GPUDiscovery) scrapeAnyEndpoint(ctx context.Context, endpoints []string) (*GPUInfo, string, error) {
+	var errs []string
+	for _, endpoint := range endpoints {
+		info, err := g.Scraper(ctx, endpoint)
+		if err == nil {
+			return info, endpoint, nil
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", endpoint, err))
+	}
+	return nil, "", fmt.Errorf("%s", strings.Join(errs, "; "))
+}
+
+func buildDCGMEndpoints(podIP string) []string {
 	template := os.Getenv("DCGM_METRICS_ENDPOINT_TEMPLATE")
 	if template == "" {
 		template = defaultDCGMEndpointTemplate
 	}
-	return strings.ReplaceAll(template, "{POD_IP}", podIP)
+	return []string{strings.ReplaceAll(template, "{POD_IP}", podIP)}
 }
+
+func buildIntelMetricsEndpoints(podIP string) []string {
+	template := os.Getenv("INTEL_XPU_METRICS_ENDPOINT_TEMPLATE")
+	if template != "" {
+		return []string{strings.ReplaceAll(template, "{POD_IP}", podIP)}
+	}
+	return []string{
+		strings.ReplaceAll(defaultIntelMetricsEndpoint, "{POD_IP}", podIP),
+		strings.ReplaceAll(defaultXPUMDMetricsEndpoint, "{POD_IP}", podIP),
+	}
+}
+
 func listDCGMExporterPods(ctx context.Context, k8sClient client.Reader) ([]corev1.Pod, error) {
 	var result []corev1.Pod
 	seen := make(map[string]struct{})
@@ -418,6 +529,41 @@ func listDCGMExporterPods(ctx context.Context, k8sClient client.Reader) ([]corev
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("no DCGM exporter pods found")
+}
+
+func listIntelXPUExporterPods(ctx context.Context, k8sClient client.Reader) ([]corev1.Pod, error) {
+	var result []corev1.Pod
+	seen := make(map[string]struct{})
+	selectors := []client.MatchingLabels{
+		{LabelApp: LabelValueXPUSMIExporter},
+		{LabelApp: LabelValueXPUMD},
+		{LabelApp: LabelValueIntelXPUManager},
+		{LabelAppKubernetesName: LabelValueXPUSMIExporter},
+		{LabelAppKubernetesName: LabelValueXPUMD},
+	}
+	var lastErr error
+	for _, selector := range selectors {
+		podList := &corev1.PodList{}
+		err := k8sClient.List(ctx, podList, selector)
+		if err != nil {
+			lastErr = fmt.Errorf("list pods: %w", err)
+			continue
+		}
+		for _, pod := range podList.Items {
+			key := pod.Namespace + "/" + pod.Name
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				result = append(result, pod)
+			}
+		}
+	}
+	if len(result) > 0 {
+		return result, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("no Intel XPU exporter pods found")
 }
 
 // listGPUOperatorRunningPods lists GPU Operator pods in the given namespace
@@ -525,193 +671,22 @@ func ScrapeMetricsEndpoint(ctx context.Context, endpoint string) (*GPUInfo, erro
 	if err != nil {
 		return nil, fmt.Errorf("parse prometheus metrics: %w", err)
 	}
+	if hasIntelMetricFamilies(metricFamilies) {
+		return parseIntelMetrics(ctx, metricFamilies)
+	}
 	return parseMetrics(ctx, metricFamilies)
 }
 
-// parseMetrics extracts GPU information and interconnect type for a node from DCGM Prometheus metrics.
-//
-// It parses the provided Prometheus metric families exported by the NVIDIA
-// DCGM exporter and derives high-level GPU inventory and interconnect information for the node.
-//
-// The function performs the following:
-//
-//   - Detects the number of GPUs by counting unique "gpu" label values
-//     from DCGM_FI_DEV_GPU_TEMP (used as a reliable per-GPU metric).
-//
-//   - Extracts the GPU model name from the "modelName" label.
-//
-//   - Calculates total VRAM per GPU using framebuffer metrics:
-//     VRAM = FB_FREE + FB_USED + FB_RESERVED
-//     (values are in MiB).
-//
-//   - Determines the interconnect type (PCIe or NVLink) from the
-//     DCGM_FI_DEV_NVLINK_LINK_COUNT metric. If NVLink links are present,
-//     interconnect is set to "nvlink", otherwise defaults to "pcie".
-//
-//   - Assumes MIG is disabled unless explicit MIG metrics are present
-//     (not included in the provided DCGM metric set).
-//
-// Parameters:
-//
-//	ctx       - Context for logging and cancellation.
-//	families  - Map of Prometheus metric families keyed by metric name.
-//
-// Returns:
-//
-//	*GPUInfo containing:
-//	  - NodeName
-//	  - GPUsPerNode
-//	  - Model
-//	  - VRAMPerGPU (MiB)
-//	  - MIGEnabled: false because no MIG metrics were collected in the DCGM families
-//	  - MIGProfiles: empty map; would contain MIG profile counts if MIG metrics were available
-//	  - System (inferred from model)
-//	  - Interconnect: "pcie" or "nvlink" depending on detected NVLink links
-//
-// Returns an error if no GPUs can be detected from the metrics.
-//
-// Notes:
-//   - This function relies on DCGM exporter metrics.
-//   - If required metrics are missing, zero values may be returned.
-//   - Interconnect detection is based on NVLink link count; other interconnects are not currently detected.
-//   - The implementation assumes homogeneous GPUs per node.
-//   - For heterogeneous configurations, per-GPU parsing should be implemented.
-func parseMetrics(ctx context.Context, families map[string]*dto.MetricFamily) (*GPUInfo, error) {
-	logger := log.FromContext(ctx)
-	getLabel := func(m *dto.Metric, name string) string {
-		for _, l := range m.GetLabel() {
-			if l.GetName() == name {
-				return l.GetValue()
-			}
-		}
-		return ""
-	}
-	// Track unique GPUs
-	gpuSet := map[string]struct{}{}
-	var model string
-	var vram int
-	var hostName string
-	var nvlinkDetected bool
-	var nvlinkLinks int
-	fbFree := map[string]float64{}
-	fbUsed := map[string]float64{}
-	fbReserved := map[string]float64{}
-	// --- Detect GPUs + Model + Hostname ---
-	if mf, ok := families["DCGM_FI_DEV_GPU_TEMP"]; ok {
-		for _, m := range mf.Metric {
-			gpuID := getLabel(m, "gpu")
-			if gpuID == "" {
-				continue
-			}
-			gpuSet[gpuID] = struct{}{}
-			// Extract model from label
-			if model == "" {
-				model = getLabel(m, "modelName")
-			}
-			// Extract Hostname label
-			if hostName == "" {
-				hostName = getLabel(m, "Hostname")
-			}
+func inferIntelHardwareSystem(deviceName, pciDeviceID string, vramMiB int) nvidiacomv1beta1.GPUSKUType {
+	for _, candidate := range []string{deviceName, pciDeviceID} {
+		if sku := InferHardwareSystem(candidate); sku != "" {
+			return sku
 		}
 	}
-	// --- Collect framebuffer metrics ---
-	if mf, ok := families["DCGM_FI_DEV_FB_FREE"]; ok {
-		for _, m := range mf.Metric {
-			gpuID := getLabel(m, "gpu")
-			if gpuID == "" {
-				continue
-			}
-			fbFree[gpuID] = m.GetGauge().GetValue()
-			if hostName == "" {
-				hostName = getLabel(m, "Hostname")
-			}
-		}
+	if strings.EqualFold(strings.TrimSpace(pciDeviceID), "0xe211") && vramMiB >= 24000 {
+		return nvidiacomv1beta1.GPUSKUTypeB60
 	}
-	if mf, ok := families["DCGM_FI_DEV_FB_USED"]; ok {
-		for _, m := range mf.Metric {
-			gpuID := getLabel(m, "gpu")
-			if gpuID == "" {
-				continue
-			}
-			fbUsed[gpuID] = m.GetGauge().GetValue()
-			if hostName == "" {
-				hostName = getLabel(m, "Hostname")
-			}
-		}
-	}
-	if mf, ok := families["DCGM_FI_DEV_FB_RESERVED"]; ok {
-		for _, m := range mf.Metric {
-			gpuID := getLabel(m, "gpu")
-			if gpuID == "" {
-				continue
-			}
-			fbReserved[gpuID] = m.GetGauge().GetValue()
-			if hostName == "" {
-				hostName = getLabel(m, "Hostname")
-			}
-		}
-	}
-	if mf, ok := families["DCGM_FI_DEV_NVLINK_LINK_COUNT"]; ok {
-		for _, m := range mf.Metric {
-			val := int(m.GetGauge().GetValue())
-			if val > 0 {
-				nvlinkDetected = true
-				nvlinkLinks = val
-				break
-			}
-		}
-	}
-	// --- Determine interconnect type ---
-	interconnect := "pcie"
-	interconnectDetail := strNone
-	if nvlinkDetected {
-		switch {
-		case nvlinkLinks >= 12:
-			interconnect = LabelNVLink
-			interconnectDetail = "full-mesh" // HGX / DGX class
-		case nvlinkLinks >= 6:
-			interconnect = LabelNVLink
-			interconnectDetail = "high"
-		default:
-			interconnect = LabelNVLink
-			interconnectDetail = "partial"
-		}
-	}
-	// --- Calculate Max VRAM
-	for gpuID := range gpuSet {
-		total := int(fbFree[gpuID] + fbUsed[gpuID] + fbReserved[gpuID])
-		if total > vram {
-			vram = total
-		}
-	}
-	gpuCount := len(gpuSet)
-	if gpuCount == 0 {
-		return nil, fmt.Errorf("no GPUs detected from DCGM metrics")
-	}
-	// --- Infer system from model ---
-	system := InferHardwareSystem(model)
-	logger.Info("Parsed GPU info",
-		"node", hostName,
-		"gpuCount", gpuCount,
-		"model", model,
-		"vramMiB", vram,
-		"system", system,
-		"interconnect", interconnect,
-		"interconnectDetail", interconnectDetail,
-		"nvlinkLinks", nvlinkLinks,
-	)
-	return &GPUInfo{
-		NodeName:         hostName,
-		GPUsPerNode:      gpuCount,
-		Model:            model,
-		VRAMPerGPU:       vram,
-		MIGEnabled:       false,
-		MIGProfiles:      map[string]int{},
-		System:           system, // populated from InferHardwareSystem
-		Interconnect:     interconnect,
-		InterconnectTier: interconnectDetail,
-		NVLinkLinks:      nvlinkLinks,
-	}, nil
+	return ""
 }
 
 // DiscoverGPUs queries Kubernetes nodes to determine GPU configuration.

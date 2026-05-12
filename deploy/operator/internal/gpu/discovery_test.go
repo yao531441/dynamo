@@ -450,6 +450,11 @@ func TestInferHardwareSystem(t *testing.T) {
 			input:    "MI200",
 			expected: nvidiacomv1beta1.GPUSKUTypeMI200,
 		},
+		{
+			name:     "Intel e211 maps to B60",
+			input:    "Intel(R) Graphics [0xe211]",
+			expected: nvidiacomv1beta1.GPUSKUTypeB60,
+		},
 
 		// --- Bare DCGM model names (no form factor suffix) ---
 		// DCGM often reports "NVIDIA H200" / "NVIDIA B200" with system="" because
@@ -783,6 +788,77 @@ func TestScrapeMetricsEndpoint(t *testing.T) {
 			t.Fatal("expected parse error, got nil")
 		}
 	})
+
+	t.Run("intel xpu metrics", func(t *testing.T) {
+		intelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := fmt.Fprintln(w, `# HELP xpu_device_info Static device identity for an Intel XPU`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# TYPE xpu_device_info gauge`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `xpu_device_info{device_id="0",device_name="Intel(R) Graphics [0xe211]",pci_device_id="0xe211",uuid="gpu-0",vendor_name="Intel(R) Corporation",node_name="xpu-node"} 1`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `xpu_device_info{device_id="1",device_name="Intel(R) Graphics [0xe211]",pci_device_id="0xe211",uuid="gpu-1",vendor_name="Intel(R) Corporation",node_name="xpu-node"} 1`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# HELP xpu_memory_total_bytes Total physical memory of an Intel XPU in bytes`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# TYPE xpu_memory_total_bytes gauge`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `xpu_memory_total_bytes{device_id="0",node_name="xpu-node"} 25669140480`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `xpu_memory_total_bytes{device_id="1",node_name="xpu-node"} 25669140480`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# HELP xpu_device_count Number of Intel XPUs visible on the node`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# TYPE xpu_device_count gauge`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `xpu_device_count{node_name="xpu-node"} 2`)
+			require.NoError(t, err)
+		}))
+		defer intelServer.Close()
+
+		info, err := ScrapeMetricsEndpoint(ctx, intelServer.URL)
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, "xpu-node", info.NodeName)
+		assert.Equal(t, 2, info.GPUsPerNode)
+		assert.Equal(t, "Intel(R) Graphics [0xe211]", info.Model)
+		assert.Equal(t, 24480, info.VRAMPerGPU)
+		assert.Equal(t, nvidiacomv1beta1.GPUSKUTypeB60, info.System)
+	})
+
+	t.Run("xpumd metrics", func(t *testing.T) {
+		xpumdServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := fmt.Fprintln(w, `# HELP hw_gpu_info Information about the GPU device.`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# TYPE hw_gpu_info gauge`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `hw_gpu_info{hw_id="0",hw_name="Intel(R) Graphics [0xe211]",pci_bdf="0000:29:00.0",pci_device_id="0xe211",pci_vendor_id="8086",hw_vendor="Intel(R) Corporation"} 1`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `hw_gpu_info{hw_id="1",hw_name="Intel(R) Graphics [0xe211]",pci_bdf="0000:2a:00.0",pci_device_id="0xe211",pci_vendor_id="8086",hw_vendor="Intel(R) Corporation"} 1`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `hw_gpu_info{hw_id="2",hw_name="Intel(R) Graphics [0xe211]",pci_bdf="0000:2b:00.0",pci_device_id="0xe211",pci_vendor_id="8086",hw_vendor="Intel(R) Corporation"} 1`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# HELP hw_memory_size_bytes Size of the memory.`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `# TYPE hw_memory_size_bytes gauge`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `hw_memory_size_bytes{hw_id="0",hw_name="Intel(R) Graphics [0xe211]",hw_memory_location="device",hw_memory_type="hbm"} 25669140480`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `hw_memory_size_bytes{hw_id="1",hw_name="Intel(R) Graphics [0xe211]",hw_memory_location="device",hw_memory_type="hbm"} 25669140480`)
+			require.NoError(t, err)
+			_, err = fmt.Fprintln(w, `hw_memory_size_bytes{hw_id="2",hw_name="Intel(R) Graphics [0xe211]",hw_memory_location="device",hw_memory_type="hbm"} 25669140480`)
+			require.NoError(t, err)
+		}))
+		defer xpumdServer.Close()
+
+		info, err := ScrapeMetricsEndpoint(ctx, xpumdServer.URL)
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, 3, info.GPUsPerNode)
+		assert.Equal(t, "Intel(R) Graphics [0xe211]", info.Model)
+		assert.Equal(t, 24480, info.VRAMPerGPU)
+		assert.Equal(t, nvidiacomv1beta1.GPUSKUTypeB60, info.System)
+	})
 }
 
 func TestDiscoverGPUsFromDCGM_CacheHit(t *testing.T) {
@@ -944,7 +1020,7 @@ func TestDiscoverGPUsFromDCGM_GPUOperatorInstalled_DCgmNotEnabled(t *testing.T) 
 
 	require.Nil(t, info)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "DCGM is not enabled in the GPU Operator")
+	require.Contains(t, err.Error(), "no GPU metrics exporters found")
 }
 
 func TestDiscoverGPUsFromDCGM_NoGPUOperator_NoDCGM(t *testing.T) {
@@ -972,8 +1048,178 @@ func TestDiscoverGPUsFromDCGM_NoGPUOperator_NoDCGM(t *testing.T) {
 
 	require.True(
 		t,
-		strings.Contains(err.Error(), "gpu operator is not installed"),
+		strings.Contains(err.Error(), "no GPU metrics exporters found"),
 	)
+}
+
+func TestDiscoverGPUsFromIntelExporterFiltered(t *testing.T) {
+	ctx := context.Background()
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	t.Run("legacy xpu-smi exporter endpoint", func(t *testing.T) {
+		xpuPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "xpu-exporter",
+				Namespace: "dynamo-xpu",
+				Labels: map[string]string{
+					LabelApp: LabelValueXPUSMIExporter,
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "xpu-node",
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: "10.0.0.3",
+			},
+		}
+
+		k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(xpuPod).Build()
+
+		mockScraper := func(ctx context.Context, endpoint string) (*GPUInfo, error) {
+			require.Contains(t, endpoint, "9966")
+			return &GPUInfo{
+				NodeName:    "xpu-node",
+				GPUsPerNode: 3,
+				Model:       "Intel(R) Graphics [0xe211]",
+				VRAMPerGPU:  24480,
+				System:      nvidiacomv1beta1.GPUSKUTypeB60,
+			}, nil
+		}
+
+		discovery := NewGPUDiscovery(mockScraper)
+
+		info, err := discovery.DiscoverGPUsFromDCGMFiltered(ctx, k8sClient, nil, nvidiacomv1beta1.GPUSKUTypeB60)
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, nvidiacomv1beta1.GPUSKUTypeB60, info.System)
+		assert.Equal(t, 3, info.GPUsPerNode)
+		assert.Equal(t, 1, info.NodesWithGPUs)
+	})
+
+	t.Run("xpumd endpoint fallback", func(t *testing.T) {
+		xpumdPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "xpumd",
+				Namespace: "intel-xpumd",
+				Labels: map[string]string{
+					LabelAppKubernetesName: LabelValueXPUMD,
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "xpumd-node",
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: "10.0.0.4",
+			},
+		}
+
+		k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(xpumdPod).Build()
+
+		var calls []string
+		mockScraper := func(ctx context.Context, endpoint string) (*GPUInfo, error) {
+			calls = append(calls, endpoint)
+			if strings.Contains(endpoint, ":9966/") {
+				return nil, fmt.Errorf("connection refused")
+			}
+			require.Contains(t, endpoint, ":8080/")
+			return &GPUInfo{
+				GPUsPerNode: 3,
+				Model:       "Intel(R) Graphics [0xe211]",
+				VRAMPerGPU:  24480,
+				System:      nvidiacomv1beta1.GPUSKUTypeB60,
+			}, nil
+		}
+
+		discovery := NewGPUDiscovery(mockScraper)
+
+		info, err := discovery.DiscoverGPUsFromDCGMFiltered(ctx, k8sClient, nil, nvidiacomv1beta1.GPUSKUTypeB60)
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, "xpumd-node", info.NodeName)
+		assert.Equal(t, nvidiacomv1beta1.GPUSKUTypeB60, info.System)
+		assert.Equal(t, []string{"http://10.0.0.4:9966/metrics", "http://10.0.0.4:8080/metrics"}, calls)
+	})
+
+	t.Run("dedupes same node across multiple intel exporter pods", func(t *testing.T) {
+		exporterPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "xpu-exporter",
+				Namespace: "intel-xpu",
+				Labels: map[string]string{
+					LabelApp: LabelValueXPUSMIExporter,
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "shared-node",
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: "10.0.0.5",
+			},
+		}
+		xpumdPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "xpumd",
+				Namespace: "intel-xpu",
+				Labels: map[string]string{
+					LabelAppKubernetesName: LabelValueXPUMD,
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "shared-node",
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: "10.0.0.6",
+			},
+		}
+
+		k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(exporterPod, xpumdPod).Build()
+
+		mockScraper := func(ctx context.Context, endpoint string) (*GPUInfo, error) {
+			return &GPUInfo{
+				GPUsPerNode: 3,
+				Model:       "Intel(R) Arc(TM) Pro B60 Graphics",
+				VRAMPerGPU:  24480,
+				System:      nvidiacomv1beta1.GPUSKUTypeB60,
+			}, nil
+		}
+
+		discovery := NewGPUDiscovery(mockScraper)
+
+		info, err := discovery.DiscoverGPUsFromDCGMFiltered(ctx, k8sClient, nil, nvidiacomv1beta1.GPUSKUTypeB60)
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, 3, info.GPUsPerNode)
+		assert.Equal(t, 1, info.NodesWithGPUs)
+	})
+}
+
+func TestDiscoverGPUHardware_FallsBackToNodeLabels(t *testing.T) {
+	ctx := context.Background()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node-fallback",
+			Labels: map[string]string{
+				LabelGPUCount:   "8",
+				LabelGPUProduct: "H100-SXM5-80GB",
+				LabelGPUMemory:  "81920",
+			},
+		},
+	}
+
+	k8sClient := newFakeClient(node)
+
+	info, err := DiscoverGPUHardware(ctx, k8sClient, NewGPUDiscovery(nil), nil, "", true)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, 8, info.GPUsPerNode)
+	assert.Equal(t, nvidiacomv1beta1.GPUSKUTypeH100SXM, info.System)
 }
 
 func TestListDCGMExporterPods(t *testing.T) {
@@ -1062,6 +1308,94 @@ func TestListDCGMExporterPods(t *testing.T) {
 
 			pods, err := listDCGMExporterPods(ctx, k8sClient)
 
+			if tt.expectErr && err == nil {
+				t.Fatalf("expected error but got nil")
+			}
+			if !tt.expectErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(pods) != tt.expectCount {
+				t.Fatalf("expected %d pods, got %d", tt.expectCount, len(pods))
+			}
+		})
+	}
+}
+
+func TestListIntelXPUExporterPods(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		objects     []client.Object
+		expectCount int
+		expectErr   bool
+	}{
+		{
+			name: "pods found via different selectors",
+			objects: []client.Object{
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod1",
+						Namespace: "ns1",
+						Labels: map[string]string{
+							LabelApp: LabelValueXPUSMIExporter,
+						},
+					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod2",
+						Namespace: "ns1",
+						Labels: map[string]string{
+							LabelAppKubernetesName: LabelValueXPUMD,
+						},
+					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod3",
+						Namespace: "ns1",
+						Labels: map[string]string{
+							LabelApp: LabelValueIntelXPUManager,
+						},
+					},
+				},
+			},
+			expectCount: 3,
+		},
+		{
+			name: "duplicate pods across selectors should dedupe",
+			objects: []client.Object{
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod1",
+						Namespace: "ns1",
+						Labels: map[string]string{
+							LabelApp:               LabelValueXPUSMIExporter,
+							LabelAppKubernetesName: LabelValueXPUSMIExporter,
+						},
+					},
+				},
+			},
+			expectCount: 1,
+		},
+		{
+			name:      "no pods found",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(tt.objects...).
+				Build()
+
+			pods, err := listIntelXPUExporterPods(ctx, k8sClient)
 			if tt.expectErr && err == nil {
 				t.Fatalf("expected error but got nil")
 			}
