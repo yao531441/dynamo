@@ -32,11 +32,44 @@ const (
 	DefaultDeviceClassName = "gpu.nvidia.com"
 )
 
-// ApplyClaim replaces the first container's nvidia.com/gpu resources with a
+func normalizeDeviceClassName(deviceClassName string) string {
+	if deviceClassName == "" {
+		return DefaultDeviceClassName
+	}
+	return deviceClassName
+}
+
+// ResourceNameForDeviceClass maps a DRA DeviceClass to the corresponding
+// schedulable resource name used in pod resource requests, limits, and taints.
+func ResourceNameForDeviceClass(deviceClassName string) corev1.ResourceName {
+	return resourceNamesForDeviceClass(deviceClassName)[0]
+}
+
+func resourceNamesForDeviceClass(deviceClassName string) []corev1.ResourceName {
+	switch normalized := normalizeDeviceClassName(deviceClassName); {
+	case strings.HasPrefix(normalized, "gpu.nvidia.com"):
+		return []corev1.ResourceName{corev1.ResourceName(commonconsts.KubeResourceGPUNvidia)}
+	case normalized == "gpu.intel.com":
+		return []corev1.ResourceName{
+			corev1.ResourceName(normalized),
+			corev1.ResourceName(commonconsts.KubeResourceGPUIntel),
+		}
+	case strings.HasPrefix(normalized, "gpu.intel.com/"):
+		return []corev1.ResourceName{
+			corev1.ResourceName(normalized),
+			corev1.ResourceName(commonconsts.KubeResourceGPUIntel),
+			corev1.ResourceName("gpu.intel.com"),
+		}
+	default:
+		return []corev1.ResourceName{corev1.ResourceName(normalized)}
+	}
+}
+
+// ApplyClaim replaces the first container's GPU resources with a
 // shared DRA ResourceClaim. Every container that references this claim name
 // will share the same physical GPUs. The function is idempotent — calling it
 // on a pod that already has the claim is a no-op.
-func ApplyClaim(podSpec *corev1.PodSpec, claimTemplateName string) error {
+func ApplyClaim(podSpec *corev1.PodSpec, claimTemplateName, deviceClassName string) error {
 	if len(podSpec.Containers) == 0 {
 		return fmt.Errorf("pod spec must have at least one container for DRA claim")
 	}
@@ -48,21 +81,32 @@ func ApplyClaim(podSpec *corev1.PodSpec, claimTemplateName string) error {
 		}
 	}
 
-	// Replace nvidia.com/gpu with the shared DRA claim.
-	gpuResource := corev1.ResourceName(commonconsts.KubeResourceGPUNvidia)
-	delete(podSpec.Containers[0].Resources.Limits, gpuResource)
-	delete(podSpec.Containers[0].Resources.Requests, gpuResource)
-	podSpec.Containers[0].Resources.Claims = append(podSpec.Containers[0].Resources.Claims, corev1.ResourceClaim{
+	// Replace the concrete GPU resource with the shared DRA claim.
+	gpuResource := ResourceNameForDeviceClass(deviceClassName)
+	resources := &podSpec.Containers[0].Resources
+	if resources.Limits != nil {
+		for _, resourceName := range resourceNamesForDeviceClass(deviceClassName) {
+			delete(resources.Limits, resourceName)
+		}
+	}
+	if resources.Requests != nil {
+		for _, resourceName := range resourceNamesForDeviceClass(deviceClassName) {
+			delete(resources.Requests, resourceName)
+		}
+	}
+	resources.Claims = append(resources.Claims, corev1.ResourceClaim{
 		Name: ClaimName,
 	})
 
-	// GPU nodes are typically tainted with nvidia.com/gpu=NoSchedule. DRA
-	// bypasses the device-plugin toleration injection, so add it explicitly.
-	podSpec.Tolerations = append(podSpec.Tolerations, corev1.Toleration{
-		Key:      commonconsts.KubeResourceGPUNvidia,
-		Operator: corev1.TolerationOpExists,
-		Effect:   corev1.TaintEffectNoSchedule,
-	})
+	// GPU nodes are typically tainted with the concrete device resource key.
+	// DRA bypasses the device-plugin toleration injection, so add it explicitly.
+	if strings.HasPrefix(normalizeDeviceClassName(deviceClassName), "gpu.nvidia.com") {
+		podSpec.Tolerations = append(podSpec.Tolerations, corev1.Toleration{
+			Key:      string(gpuResource),
+			Operator: corev1.TolerationOpExists,
+			Effect:   corev1.TaintEffectNoSchedule,
+		})
+	}
 
 	podSpec.ResourceClaims = append(podSpec.ResourceClaims, corev1.PodResourceClaim{
 		Name:                      ClaimName,
@@ -123,9 +167,7 @@ func GenerateResourceClaimTemplate(
 		return template, true, nil
 	}
 
-	if deviceClassName == "" {
-		deviceClassName = DefaultDeviceClassName
-	}
+	deviceClassName = normalizeDeviceClassName(deviceClassName)
 
 	if cl != nil {
 		dc := &resourcev1.DeviceClass{}

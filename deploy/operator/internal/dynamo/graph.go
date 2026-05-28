@@ -1400,7 +1400,7 @@ func GenerateBasePodSpec(
 		}
 	}
 
-	// Intra-pod GMS: replace nvidia.com/gpu with a shared DRA claim and add the server
+	// Intra-pod GMS: replace the concrete GPU resource with a shared DRA claim and add the server
 	// sidecar directly into this pod.
 	//
 	// Inter-pod GMS (gpuMemoryService.mode=interPod, with or without failover)
@@ -1412,7 +1412,7 @@ func GenerateBasePodSpec(
 	if component.GPUMemoryService != nil && component.GPUMemoryService.Enabled &&
 		!component.IsInterPodGMSEnabled() {
 		claimTemplateName := dra.ResourceClaimTemplateName(parentGraphDeploymentName, serviceName)
-		if err := dra.ApplyClaim(&podSpec, claimTemplateName); err != nil {
+		if err := dra.ApplyClaim(&podSpec, claimTemplateName, component.GPUMemoryService.DeviceClassName); err != nil {
 			return nil, fmt.Errorf("failed to apply DRA claim for GMS: %w", err)
 		}
 		gms.EnsureServerSidecar(&podSpec, &podSpec.Containers[0])

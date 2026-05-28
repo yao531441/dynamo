@@ -120,7 +120,7 @@ func buildCheckpointJob(
 
 	if ckpt.Spec.GPUMemoryService != nil && ckpt.Spec.GPUMemoryService.Enabled {
 		claimTemplateName := dra.ResourceClaimTemplateName("checkpoint-"+hash, "worker")
-		if err := dra.ApplyClaim(&podTemplate.Spec, claimTemplateName); err != nil {
+		if err := dra.ApplyClaim(&podTemplate.Spec, claimTemplateName, ckpt.Spec.GPUMemoryService.DeviceClassName); err != nil {
 			return nil, fmt.Errorf("failed to apply DRA claim for GMS checkpoint: %w", err)
 		}
 		storage, err := checkpoint.ResolveStorage(
@@ -147,7 +147,7 @@ func buildCheckpointJob(
 
 	// Wrap with cuda-checkpoint --launch-job for multi-GPU jobs (TP*PP > 1).
 	// Use checkpoint identity (not container limits) because DRA may have
-	// already removed nvidia.com/gpu from the template.
+	// already removed the concrete GPU resource from the template.
 	tp := ckpt.Spec.Identity.TensorParallelSize
 	pp := ckpt.Spec.Identity.PipelineParallelSize
 	if tp == 0 {

@@ -8,6 +8,7 @@ package dra
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
@@ -46,16 +47,29 @@ func basePodSpec() corev1.PodSpec {
 	}
 }
 
+func basePodSpecWithGPUResource(resourceName corev1.ResourceName) corev1.PodSpec {
+	ps := basePodSpec()
+	ps.Containers[0].Resources = corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{
+			resourceName: resource.MustParse("2"),
+		},
+		Requests: corev1.ResourceList{
+			resourceName: resource.MustParse("2"),
+		},
+	}
+	return ps
+}
+
 func TestApplyClaim_EmptyContainers(t *testing.T) {
 	ps := corev1.PodSpec{}
-	err := ApplyClaim(&ps, "myapp-worker-gpu")
+	err := ApplyClaim(&ps, "myapp-worker-gpu", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one container")
 }
 
 func TestApplyClaim_ReplacesGPUWithDRAClaim(t *testing.T) {
 	ps := basePodSpec()
-	err := ApplyClaim(&ps, "myapp-worker-gpu")
+	err := ApplyClaim(&ps, "myapp-worker-gpu", "")
 	require.NoError(t, err)
 
 	main := ps.Containers[0]
@@ -81,11 +95,53 @@ func TestApplyClaim_ReplacesGPUWithDRAClaim(t *testing.T) {
 	assert.Empty(t, ps.InitContainers)
 }
 
+func TestApplyClaim_ReplacesIntelGPUWithDRAClaim(t *testing.T) {
+	ps := basePodSpecWithGPUResource(corev1.ResourceName(commonconsts.KubeResourceGPUIntel))
+	err := ApplyClaim(&ps, "myapp-worker-gpu", "gpu.intel.com")
+	require.NoError(t, err)
+
+	main := ps.Containers[0]
+	gpuResource := corev1.ResourceName(commonconsts.KubeResourceGPUIntel)
+	_, hasLimit := main.Resources.Limits[gpuResource]
+	_, hasRequest := main.Resources.Requests[gpuResource]
+	assert.False(t, hasLimit)
+	assert.False(t, hasRequest)
+	require.Len(t, main.Resources.Claims, 1)
+	assert.Equal(t, ClaimName, main.Resources.Claims[0].Name)
+
+	for _, tol := range ps.Tolerations {
+		if strings.HasPrefix(tol.Key, "gpu.intel.com") {
+			t.Errorf("unexpected Intel GPU toleration: %s", tol.Key)
+		}
+	}
+}
+
+func TestApplyClaim_CustomVendorNoToleration(t *testing.T) {
+	ps := basePodSpecWithGPUResource(corev1.ResourceName("vendor.example.com/accelerator"))
+	err := ApplyClaim(&ps, "myapp-worker-gpu", "vendor.example.com/accelerator")
+	require.NoError(t, err)
+
+	main := ps.Containers[0]
+	gpuResource := corev1.ResourceName("vendor.example.com/accelerator")
+	_, hasLimit := main.Resources.Limits[gpuResource]
+	_, hasRequest := main.Resources.Requests[gpuResource]
+	assert.False(t, hasLimit)
+	assert.False(t, hasRequest)
+	require.Len(t, main.Resources.Claims, 1)
+	assert.Equal(t, ClaimName, main.Resources.Claims[0].Name)
+
+	for _, tol := range ps.Tolerations {
+		if strings.HasPrefix(tol.Key, "gpu.nvidia.com") || strings.HasPrefix(tol.Key, "nvidia.com") {
+			t.Errorf("unexpected GPU toleration for custom vendor: %s", tol.Key)
+		}
+	}
+}
+
 func TestApplyClaim_AlwaysTargetsFirstContainer(t *testing.T) {
 	ps := basePodSpec()
 	ps.Containers = append(ps.Containers, corev1.Container{Name: "sidecar", Image: "sidecar:latest"})
 
-	err := ApplyClaim(&ps, "myapp-worker-gpu")
+	err := ApplyClaim(&ps, "myapp-worker-gpu", "")
 	require.NoError(t, err)
 
 	require.Len(t, ps.Containers[0].Resources.Claims, 1)
@@ -108,6 +164,14 @@ func TestGenerateResourceClaimTemplate_CustomDeviceClass(t *testing.T) {
 	tmpl, _, err := GenerateResourceClaimTemplate(context.Background(), nil, "myapp-worker-gpu", "default", 2, "gpu.intel.com/xe")
 	require.NoError(t, err)
 	assert.Equal(t, "gpu.intel.com/xe", tmpl.Spec.Spec.Devices.Requests[0].Exactly.DeviceClassName)
+}
+
+func TestResourceNameForDeviceClass(t *testing.T) {
+	assert.Equal(t, corev1.ResourceName(commonconsts.KubeResourceGPUNvidia), ResourceNameForDeviceClass(""))
+	assert.Equal(t, corev1.ResourceName(commonconsts.KubeResourceGPUNvidia), ResourceNameForDeviceClass("gpu.nvidia.com"))
+	assert.Equal(t, corev1.ResourceName("gpu.intel.com"), ResourceNameForDeviceClass("gpu.intel.com"))
+	assert.Equal(t, corev1.ResourceName("gpu.intel.com/xe"), ResourceNameForDeviceClass("gpu.intel.com/xe"))
+	assert.Equal(t, corev1.ResourceName("vendor.example.com/accelerator"), ResourceNameForDeviceClass("vendor.example.com/accelerator"))
 }
 
 func TestGenerateResourceClaimTemplate_DisabledReturnsDelete(t *testing.T) {

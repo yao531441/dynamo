@@ -26,6 +26,7 @@ import (
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/checkpoint"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
 	gms "github.com/ai-dynamo/dynamo/deploy/operator/internal/gms"
 	snapshotprotocol "github.com/ai-dynamo/dynamo/deploy/snapshot/protocol"
 	"github.com/stretchr/testify/assert"
@@ -87,9 +88,10 @@ func checkpointTestConfig() *configv1alpha1.OperatorConfiguration {
 
 func makeCheckpointReconciler(s *runtime.Scheme, objs ...client.Object) *CheckpointReconciler {
 	return &CheckpointReconciler{
-		Client:   fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).WithStatusSubresource(&nvidiacomv1alpha1.DynamoCheckpoint{}).Build(),
-		Config:   checkpointTestConfig(),
-		Recorder: record.NewFakeRecorder(10),
+		Client:        fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).WithStatusSubresource(&nvidiacomv1alpha1.DynamoCheckpoint{}).Build(),
+		Config:        checkpointTestConfig(),
+		RuntimeConfig: &commonController.RuntimeConfig{},
+		Recorder:      record.NewFakeRecorder(10),
 	}
 }
 
@@ -506,6 +508,69 @@ func TestCheckpointReconciler_Reconcile(t *testing.T) {
 		serviceAccounts := &corev1.ServiceAccountList{}
 		require.NoError(t, r.List(ctx, serviceAccounts, client.InNamespace(testNamespace)))
 		assert.Empty(t, serviceAccounts.Items)
+	})
+
+	t.Run("GMS checkpoint uses Intel GPU resource for DRA claim template count", func(t *testing.T) {
+		t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "1")
+		ckpt := makeTestCheckpoint(nvidiacomv1alpha1.DynamoCheckpointPhasePending)
+		ckpt.Spec.GPUMemoryService = &nvidiacomv1alpha1.GPUMemoryServiceSpec{
+			Enabled:         true,
+			DeviceClassName: "gpu.intel.com",
+		}
+		ckpt.Spec.Job.PodTemplateSpec.Spec.Containers[0].Resources = corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				corev1.ResourceName(consts.KubeResourceGPUIntel): resource.MustParse("2"),
+			},
+		}
+		deviceClass := &resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "gpu.intel.com"},
+		}
+		snapshotAgentDaemonSet := &appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "snapshot-agent",
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					snapshotprotocol.SnapshotAgentLabelKey: snapshotprotocol.SnapshotAgentLabelValue,
+				},
+			},
+			Spec: appsv1.DaemonSetSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name: snapshotprotocol.SnapshotAgentContainerName,
+							VolumeMounts: []corev1.VolumeMount{{
+								Name:      snapshotprotocol.SnapshotAgentVolumeName,
+								MountPath: "/checkpoints",
+							}},
+						}},
+						Volumes: []corev1.Volume{{
+							Name: snapshotprotocol.SnapshotAgentVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: "snapshot-pvc",
+								},
+							},
+						}},
+					},
+				},
+			},
+		}
+		r := makeCheckpointReconciler(s, ckpt, deviceClass, snapshotAgentDaemonSet)
+		r.RuntimeConfig.DRAEnabled = true
+
+		result, err := r.Reconcile(ctx, ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: ckpt.Name, Namespace: testNamespace},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+
+		claimTemplates := &resourcev1.ResourceClaimTemplateList{}
+		require.NoError(t, r.List(ctx, claimTemplates, client.InNamespace(testNamespace)))
+		require.Len(t, claimTemplates.Items, 1)
+		req := claimTemplates.Items[0].Spec.Spec.Devices.Requests[0]
+		require.NotNil(t, req.Exactly)
+		assert.Equal(t, "gpu.intel.com", req.Exactly.DeviceClassName)
+		assert.Equal(t, int64(2), req.Exactly.Count)
 	})
 
 	t.Run("Ready phase is a no-op", func(t *testing.T) {

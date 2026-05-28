@@ -224,11 +224,25 @@ func (r *CheckpointReconciler) handlePending(ctx context.Context, ckpt *nvidiaco
 		if len(ckpt.Spec.Job.PodTemplateSpec.Spec.Containers) == 0 {
 			return ctrl.Result{}, fmt.Errorf("checkpoint job requires at least one container for GMS")
 		}
-		gpuQty := ckpt.Spec.Job.PodTemplateSpec.Spec.Containers[0].Resources.Limits[corev1.ResourceName(consts.KubeResourceGPUNvidia)]
-		gpuCount := int(gpuQty.Value())
 		deviceClassName := ""
 		if ckpt.Spec.GPUMemoryService != nil {
 			deviceClassName = ckpt.Spec.GPUMemoryService.DeviceClassName
+		}
+		gpuResourceName := dra.ResourceNameForDeviceClass(deviceClassName)
+		resources := ckpt.Spec.Job.PodTemplateSpec.Spec.Containers[0].Resources
+		gpuQty := resources.Limits[gpuResourceName]
+		if gpuQty.IsZero() && gpuResourceName != corev1.ResourceName(consts.KubeResourceGPUIntel) {
+			gpuQty = resources.Limits[corev1.ResourceName(consts.KubeResourceGPUIntel)]
+		}
+		if gpuQty.IsZero() {
+			gpuQty = resources.Requests[gpuResourceName]
+		}
+		if gpuQty.IsZero() && gpuResourceName != corev1.ResourceName(consts.KubeResourceGPUIntel) {
+			gpuQty = resources.Requests[corev1.ResourceName(consts.KubeResourceGPUIntel)]
+		}
+		gpuCount := int(gpuQty.Value())
+		if gpuCount <= 0 {
+			return ctrl.Result{}, fmt.Errorf("checkpoint GMS requires a positive %q resource request or limit on the main container", gpuResourceName)
 		}
 		claimTemplateName := dra.ResourceClaimTemplateName("checkpoint-"+hash, "worker")
 		_, _, err := commonController.SyncResource(ctx, r, ckpt, func(ctx context.Context) (*resourcev1.ResourceClaimTemplate, bool, error) {
