@@ -744,3 +744,143 @@ func envToMap(envs []corev1.EnvVar) map[string]string {
 	}
 	return m
 }
+
+func TestRequiresDRAForComponent(t *testing.T) {
+	tests := []struct {
+		name string
+		spec *v1alpha1.DynamoComponentDeploymentSharedSpec
+		want bool
+	}{
+		{"nil spec", nil, false},
+		{"no DRA configured", &v1alpha1.DynamoComponentDeploymentSharedSpec{}, false},
+		{"GMS enabled", &v1alpha1.DynamoComponentDeploymentSharedSpec{
+			GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{Enabled: true},
+		}, true},
+		{"standalone DRA", &v1alpha1.DynamoComponentDeploymentSharedSpec{
+			DeviceClassName: "gpu.intel.com",
+		}, true},
+		{"both configured", &v1alpha1.DynamoComponentDeploymentSharedSpec{
+			DeviceClassName:  "gpu.intel.com",
+			GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{Enabled: true},
+		}, true},
+		{"GMS disabled", &v1alpha1.DynamoComponentDeploymentSharedSpec{
+			GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{Enabled: false},
+		}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, RequiresDRAForComponent(tt.spec))
+		})
+	}
+}
+
+func TestResolveDRAConfigForComponent(t *testing.T) {
+	tests := []struct {
+		name             string
+		spec             *v1alpha1.DynamoComponentDeploymentSharedSpec
+		wantGPUCount     int
+		wantDeviceClass  string
+	}{
+		{
+			name:             "nil spec returns empty",
+			spec:             nil,
+			wantGPUCount:     0,
+			wantDeviceClass:  "",
+		},
+		{
+			name:             "no resources returns empty",
+			spec:             &v1alpha1.DynamoComponentDeploymentSharedSpec{},
+			wantGPUCount:     0,
+			wantDeviceClass:  "",
+		},
+		{
+			name: "zero GPU count returns empty",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				Resources: &v1alpha1.Resources{
+					Limits: &v1alpha1.ResourceItem{GPU: "0"},
+				},
+			},
+			wantGPUCount:    0,
+			wantDeviceClass: "",
+		},
+		{
+			name: "GPU without device class returns empty",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				Resources: &v1alpha1.Resources{
+					Limits: &v1alpha1.ResourceItem{GPU: "2"},
+				},
+			},
+			wantGPUCount:    0,
+			wantDeviceClass: "",
+		},
+		{
+			name: "standalone DRA with GPU count from limits",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				DeviceClassName: "gpu.intel.com",
+				Resources: &v1alpha1.Resources{
+					Limits: &v1alpha1.ResourceItem{GPU: "4"},
+				},
+			},
+			wantGPUCount:    4,
+			wantDeviceClass: "gpu.intel.com",
+		},
+		{
+			name: "standalone DRA with GPU count from requests",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				DeviceClassName: "gpu.amd.com",
+				Resources: &v1alpha1.Resources{
+					Requests: &v1alpha1.ResourceItem{GPU: "2"},
+				},
+			},
+			wantGPUCount:    2,
+			wantDeviceClass: "gpu.amd.com",
+		},
+		{
+			name: "GMS enabled defaults to NVIDIA",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{Enabled: true},
+				Resources: &v1alpha1.Resources{
+					Limits: &v1alpha1.ResourceItem{GPU: "1"},
+				},
+			},
+			wantGPUCount:    1,
+			wantDeviceClass: dra.DefaultDeviceClassName,
+		},
+		{
+			name: "GMS device class overrides standalone",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				DeviceClassName: "gpu.intel.com",
+				GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{
+					Enabled:true,
+					DeviceClassName: "gpu.nvidia.com/h200",
+				},
+				Resources: &v1alpha1.Resources{
+					Limits: &v1alpha1.ResourceItem{GPU: "8"},
+				},
+			},
+			wantGPUCount:    8,
+			wantDeviceClass: "gpu.nvidia.com/h200",
+		},
+		{
+			name: "limits takes precedence over requests",
+			spec: &v1alpha1.DynamoComponentDeploymentSharedSpec{
+				DeviceClassName: "gpu.intel.com",
+				Resources: &v1alpha1.Resources{
+					Limits:   &v1alpha1.ResourceItem{GPU: "4"},
+					Requests: &v1alpha1.ResourceItem{GPU: "2"},
+				},
+			},
+			wantGPUCount:    4,
+			wantDeviceClass: "gpu.intel.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ResolveDRAConfigForComponent(tt.spec)
+			assert.Equal(t, tt.wantGPUCount, config.GPUCount)
+			assert.Equal(t, tt.wantDeviceClass, config.DeviceClassName)
+		})
+	}
+}

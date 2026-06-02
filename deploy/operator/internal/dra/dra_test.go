@@ -205,3 +205,93 @@ func TestExtractGPUParams(t *testing.T) {
 	assert.Equal(t, 2, count)
 	assert.Equal(t, "gpu.intel.com/xe", dc)
 }
+
+func TestResourceNamesForDeviceClass(t *testing.T) {
+	tests := []struct {
+		name           string
+		deviceClass    string
+		wantNames      []corev1.ResourceName
+	}{
+		{
+			name:        "NVIDIA returns single resource name",
+			deviceClass: "gpu.nvidia.com",
+			wantNames:   []corev1.ResourceName{"nvidia.com/gpu"},
+		},
+		{
+			name:        "NVIDIA subclass returns single resource name",
+			deviceClass: "gpu.nvidia.com/h100",
+			wantNames:   []corev1.ResourceName{"nvidia.com/gpu"},
+		},
+		{
+			name:        "Intel base returns two resource names",
+			deviceClass: "gpu.intel.com",
+			wantNames:   []corev1.ResourceName{"gpu.intel.com", "gpu.intel.com/xe"},
+		},
+		{
+			name:        "Intel subclass returns three resource names",
+			deviceClass: "gpu.intel.com/xe",
+			wantNames:   []corev1.ResourceName{"gpu.intel.com/xe", "gpu.intel.com/xe", "gpu.intel.com"},
+		},
+		{
+			name:        "AMD MI200 returns AMD resource name",
+			deviceClass: "gpu.amd.com",
+			wantNames:   []corev1.ResourceName{"gpu.amd.com"},
+		},
+		{
+			name:        "custom vendor returns as-is",
+			deviceClass: "vendor.example.com/gpu",
+			wantNames:   []corev1.ResourceName{"vendor.example.com/gpu"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resourceNamesForDeviceClass(tt.deviceClass)
+			assert.Equal(t, tt.wantNames, got)
+		})
+	}
+}
+
+func TestNormalizeDeviceClassName(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		want        string
+	}{
+		{"empty returns default", "", DefaultDeviceClassName},
+		{"non-empty returns as-is", "gpu.intel.com", "gpu.intel.com"},
+		{"custom value preserved", "vendor.example.com/gpu", "vendor.example.com/gpu"},
+		{"NVIDIA subclass preserved", "gpu.nvidia.com/h100", "gpu.nvidia.com/h100"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeDeviceClassName(tt.input))
+		})
+	}
+}
+
+func TestApplyClaim_IntelSubclass(t *testing.T) {
+	ps := basePodSpecWithGPUResource(corev1.ResourceName("gpu.intel.com/xe"))
+	err := ApplyClaim(&ps, "myapp-worker-gpu", "gpu.intel.com/xe")
+	require.NoError(t, err)
+
+	main := ps.Containers[0]
+
+	// Should remove all Intel GPU resource names
+	_, hasLimit := main.Resources.Limits[corev1.ResourceName("gpu.intel.com/xe")]
+	assert.False(t, hasLimit)
+	_, hasRequest := main.Resources.Requests[corev1.ResourceName("gpu.intel.com/xe")]
+	assert.False(t, hasRequest)
+
+	// Should have DRA claim
+	require.Len(t, main.Resources.Claims, 1)
+	assert.Equal(t, ClaimName, main.Resources.Claims[0].Name)
+
+	// Should NOT have GPU toleration (Intel nodes have no GPU taint)
+	for _, tol := range ps.Tolerations {
+		if strings.HasPrefix(tol.Key, "gpu.intel.com") || strings.HasPrefix(tol.Key, "gpu.nvidia.com") {
+			t.Errorf("unexpected GPU toleration: %s", tol.Key)
+		}
+	}
+}
