@@ -229,17 +229,19 @@ func legacyDGDRRestoreAnnotationFields(src *v1beta1.DynamoGraphDeploymentRequest
 	}
 	if raw, ok := getAnnFromObj(&src.ObjectMeta, legacyAnnDGDRDeployOverrides); ok && raw != "" {
 		var overrides struct {
-			Name        string            `json:"name,omitempty"`
-			Namespace   string            `json:"namespace,omitempty"`
-			Labels      map[string]string `json:"labels,omitempty"`
-			Annotations map[string]string `json:"annotations,omitempty"`
+			Name            string            `json:"name,omitempty"`
+			Namespace       string            `json:"namespace,omitempty"`
+			Labels          map[string]string `json:"labels,omitempty"`
+			Annotations     map[string]string `json:"annotations,omitempty"`
+			DeviceClassName string            `json:"deviceClassName,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(raw), &overrides); err == nil {
 			dst.DeploymentOverrides = &DeploymentOverridesSpec{
-				Name:        overrides.Name,
-				Namespace:   overrides.Namespace,
-				Labels:      overrides.Labels,
-				Annotations: overrides.Annotations,
+				Name:            overrides.Name,
+				Namespace:       overrides.Namespace,
+				Labels:          overrides.Labels,
+				Annotations:     overrides.Annotations,
+				DeviceClassName: overrides.DeviceClassName,
 			}
 		}
 	}

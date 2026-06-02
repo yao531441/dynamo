@@ -1152,6 +1152,22 @@ func Test_reconcileGroveResources(t *testing.T) {
 			draEnabled:       false,
 			wantErrSubstring: "requires DRA",
 		},
+		{
+			name: "standalone DRA requires DRA - returns clear error when DRA is disabled",
+			dgdSpec: v1alpha1.DynamoGraphDeploymentSpec{
+				BackendFramework: "vllm",
+				Services: map[string]*v1alpha1.DynamoComponentDeploymentSharedSpec{
+					"worker": {
+						ComponentType:   string(commonconsts.ComponentTypeWorker),
+						Replicas:        ptr.To(int32(1)),
+						DeviceClassName: "gpu.intel.com",
+						Resources:       &v1alpha1.Resources{Limits: &v1alpha1.ResourceItem{GPU: "1"}},
+					},
+				},
+			},
+			draEnabled:       false,
+			wantErrSubstring: "deviceClassName",
+		},
 	}
 
 	for _, tt := range tests {

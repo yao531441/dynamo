@@ -31,6 +31,7 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/checkpoint"
 	commonconsts "github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dra"
 	snapshotprotocol "github.com/ai-dynamo/dynamo/deploy/snapshot/protocol"
 	grovev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
 	"github.com/google/go-cmp/cmp"
@@ -6148,6 +6149,53 @@ func TestGenerateBasePodSpec_ResourceClaims(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateBasePodSpec_StandaloneDRA(t *testing.T) {
+	secretsRetriever := &mockSecretsRetriever{}
+	controllerConfig := &configv1alpha1.OperatorConfiguration{}
+
+	component := &v1alpha1.DynamoComponentDeploymentSharedSpec{
+		ComponentType:   commonconsts.ComponentTypeWorker,
+		DeviceClassName: "gpu.intel.com",
+		Resources: &v1alpha1.Resources{
+			Limits: &v1alpha1.ResourceItem{
+				CPU:     "4",
+				Memory:  "8Gi",
+				GPU:     "2",
+				GPUType: "gpu.intel.com/xe",
+			},
+		},
+	}
+
+	podSpec, err := GenerateBasePodSpec(
+		component,
+		BackendFrameworkTRTLLM,
+		secretsRetriever,
+		"test-deployment",
+		"default",
+		RoleMain,
+		1,
+		controllerConfig,
+		commonconsts.MultinodeDeploymentTypeGrove,
+		"test-service",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("GenerateBasePodSpec() unexpected error: %v", err)
+	}
+
+	require.Len(t, podSpec.Containers, 1)
+	require.Len(t, podSpec.Containers[0].Resources.Claims, 1)
+	assert.Equal(t, dra.ClaimName, podSpec.Containers[0].Resources.Claims[0].Name)
+	assert.NotContains(t, podSpec.Containers[0].Resources.Limits, corev1.ResourceName("gpu.intel.com"))
+	assert.NotContains(t, podSpec.Containers[0].Resources.Limits, corev1.ResourceName(commonconsts.KubeResourceGPUIntel))
+
+	require.Len(t, podSpec.ResourceClaims, 1)
+	assert.Equal(t, dra.ClaimName, podSpec.ResourceClaims[0].Name)
+	assert.Equal(t, ptr.To("test-deployment-test-service-gpu"), podSpec.ResourceClaims[0].ResourceClaimTemplateName)
+	assert.Len(t, podSpec.Containers, 1, "standalone DRA must not inject the GMS sidecar")
 }
 
 func TestGenerateBasePodSpec_UseAsCompilationCache_BackendSupport(t *testing.T) {

@@ -150,6 +150,16 @@ type DynamoComponentDeploymentSharedSpec struct {
 	// +optional
 	TopologyConstraint *TopologyConstraint `json:"topologyConstraint,omitempty"`
 
+	// DeviceClassName is the DRA DeviceClass for standalone GPU allocation.
+	// When set, the component requests GPUs through a DRA ResourceClaim even if
+	// gpuMemoryService is not enabled.
+	//
+	// Empty string disables standalone DRA. When gpuMemoryService is enabled,
+	// gpuMemoryService.deviceClassName takes precedence to preserve existing GMS
+	// compatibility behavior.
+	// +optional
+	DeviceClassName string `json:"deviceClassName,omitempty"`
+
 	// GPUMemoryService configures the GPU Memory Service (GMS) sidecar.
 	// When enabled, a GMS sidecar is injected and GPU access is managed via DRA.
 	// +optional

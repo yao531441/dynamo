@@ -1409,13 +1409,15 @@ func GenerateBasePodSpec(
 	// generateGrovePodCliqueSet → gmsWeightServerPodSpec); re-applying the
 	// claim and injecting a sidecar here would produce a double-wired engine
 	// pod (stray GMS sidecar, conflicting claim).
-	if component.GPUMemoryService != nil && component.GPUMemoryService.Enabled &&
-		!component.IsInterPodGMSEnabled() {
+	draConfig := ResolveDRAConfigForComponent(component)
+	if draConfig.DeviceClassName != "" && !component.IsInterPodGMSEnabled() {
 		claimTemplateName := dra.ResourceClaimTemplateName(parentGraphDeploymentName, serviceName)
-		if err := dra.ApplyClaim(&podSpec, claimTemplateName, component.GPUMemoryService.DeviceClassName); err != nil {
-			return nil, fmt.Errorf("failed to apply DRA claim for GMS: %w", err)
+		if err := dra.ApplyClaim(&podSpec, claimTemplateName, draConfig.DeviceClassName); err != nil {
+			return nil, fmt.Errorf("failed to apply DRA claim: %w", err)
 		}
-		gms.EnsureServerSidecar(&podSpec, &podSpec.Containers[0])
+		if component.GPUMemoryService != nil && component.GPUMemoryService.Enabled {
+			gms.EnsureServerSidecar(&podSpec, &podSpec.Containers[0])
+		}
 	}
 
 	// Clone main container into two engine containers (active + standby) for failover.
@@ -1875,7 +1877,9 @@ func GenerateGrovePodCliqueSet(
 		applyCliqueStartupDependencies(gangSet, roles, backendFramework, numberOfNodes, isInterPodGMS)
 
 		if isInterPodGMS {
-			resourceClaimTemplates = append(resourceClaimTemplates, gmsResourceClaimTemplateConfigs(serviceName, component.Resources, roles)...)
+			resourceClaimTemplates = append(resourceClaimTemplates, gmsResourceClaimTemplateConfigs(serviceName, component, roles)...)
+		} else {
+			resourceClaimTemplates = append(resourceClaimTemplates, componentResourceClaimTemplateConfigs(dynamoDeployment.Name, serviceName, component)...)
 		}
 
 		if usesPCSG {

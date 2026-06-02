@@ -211,6 +211,31 @@ func TestSharedSpecValidator_Validate(t *testing.T) {
 			wantErr:             false,
 		},
 		{
+			name: "standalone DRA requires worker component",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeFrontend,
+				DeviceClassName: "gpu.intel.com",
+				Resources:       workerGPU,
+			},
+			fieldPath:           "spec",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             true,
+			errMsg:              "spec.deviceClassName: standalone DRA is only supported for worker components (componentType must be worker, prefill, or decode)",
+		},
+		{
+			name: "standalone DRA conflicts with GMS device class",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:    consts.ComponentTypeWorker,
+				DeviceClassName:  "gpu.intel.com",
+				Resources:        workerGPU,
+				GPUMemoryService: &nvidiacomv1alpha1.GPUMemoryServiceSpec{Enabled: true, DeviceClassName: "gpu.nvidia.com"},
+			},
+			fieldPath:           "spec",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             true,
+			errMsg:              "spec.deviceClassName conflicts with spec.gpuMemoryService.deviceClassName: gpuMemoryService takes precedence when enabled",
+		},
+		{
 			name: "custom field path for service validation",
 			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
 				Replicas: &negativeReplicas,
@@ -399,6 +424,20 @@ func TestSharedSpecValidator_Validate_Warnings(t *testing.T) {
 			calculatedNamespace: "hannahz-trtllm-disagg",
 			wantWarnings:        1,
 			wantWarningContains: "Value 'my-custom-namespace' will be replaced with 'hannahz-trtllm-disagg'",
+		},
+		{
+			name: "warning for standalone DRA overridden by GMS",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:    consts.ComponentTypeWorker,
+				Replicas:         &validReplicas,
+				DeviceClassName:  "gpu.intel.com",
+				Resources:        &nvidiacomv1alpha1.Resources{Limits: &nvidiacomv1alpha1.ResourceItem{GPU: "1"}},
+				GPUMemoryService: &nvidiacomv1alpha1.GPUMemoryServiceSpec{Enabled: true},
+			},
+			fieldPath:           "spec",
+			calculatedNamespace: "default-my-dgd",
+			wantWarnings:        1,
+			wantWarningContains: "deviceClassName is ignored because gpuMemoryService is enabled",
 		},
 	}
 

@@ -136,6 +136,12 @@ func (v *SharedSpecValidator) Validate(ctx context.Context) (admission.Warnings,
 		return nil, err
 	}
 
+	standaloneDRAWarnings, err := v.validateStandaloneDRA()
+	if err != nil {
+		return nil, err
+	}
+	warnings = append(warnings, standaloneDRAWarnings...)
+
 	// Validate GMS failover constraints
 	if err := v.validateFailover(); err != nil {
 		return nil, err
@@ -411,6 +417,45 @@ func (v *SharedSpecValidator) validateGPUMemoryService() error {
 	}
 
 	return nil
+}
+
+func (v *SharedSpecValidator) validateStandaloneDRA() (admission.Warnings, error) {
+	if v.spec.DeviceClassName == "" {
+		return nil, nil
+	}
+
+	isWorker := v.spec.ComponentType == consts.ComponentTypeWorker ||
+		v.spec.ComponentType == consts.ComponentTypePrefill ||
+		v.spec.ComponentType == consts.ComponentTypeDecode
+	if !isWorker {
+		return nil, fmt.Errorf(
+			"%s.deviceClassName: standalone DRA is only supported for worker components (componentType must be worker, prefill, or decode)",
+			v.fieldPath)
+	}
+
+	gpuCount, err := parseGPUCount(v.spec.Resources)
+	if err != nil || gpuCount < 1 {
+		return nil, fmt.Errorf(
+			"%s.deviceClassName: standalone DRA requires resources.limits.gpu >= 1",
+			v.fieldPath)
+	}
+
+	if v.spec.GPUMemoryService == nil || !v.spec.GPUMemoryService.Enabled {
+		return nil, nil
+	}
+
+	if v.spec.GPUMemoryService.DeviceClassName != "" && v.spec.GPUMemoryService.DeviceClassName != v.spec.DeviceClassName {
+		return nil, fmt.Errorf(
+			"%s.deviceClassName conflicts with %s.gpuMemoryService.deviceClassName: gpuMemoryService takes precedence when enabled",
+			v.fieldPath, v.fieldPath)
+	}
+
+	return admission.Warnings{
+		fmt.Sprintf(
+			"%s.deviceClassName is ignored because gpuMemoryService is enabled and the GMS DeviceClass selection takes precedence",
+			v.fieldPath,
+		),
+	}, nil
 }
 
 func (v *SharedSpecValidator) validateSnapshotWithGPUMemoryService() error {

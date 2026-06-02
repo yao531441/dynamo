@@ -135,6 +135,12 @@ type DeploymentOverridesSpec struct {
 	// Example: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1"
 	// +kubebuilder:validation:Optional
 	WorkersImage string `json:"workersImage,omitempty"`
+
+	// DeviceClassName is the DRA DeviceClass for standalone GPU allocation.
+	// When set, worker-like services in the generated DynamoGraphDeployment use
+	// standalone DRA with this DeviceClass.
+	// +kubebuilder:validation:Optional
+	DeviceClassName string `json:"deviceClassName,omitempty"`
 }
 
 // DynamoGraphDeploymentRequestSpec defines the desired state of a DynamoGraphDeploymentRequest.

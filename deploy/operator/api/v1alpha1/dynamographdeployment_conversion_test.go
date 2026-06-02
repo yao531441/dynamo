@@ -1519,6 +1519,25 @@ func TestDGD_FromV1alpha1_GMSEnabledFalseEmptyPayload(t *testing.T) {
 	}
 }
 
+func TestDGD_FromV1alpha1_StandaloneDRA(t *testing.T) {
+	src := &DynamoGraphDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "standalone-dra", Namespace: "ns"},
+		Spec: DynamoGraphDeploymentSpec{
+			Services: map[string]*DynamoComponentDeploymentSharedSpec{
+				"worker": {
+					ComponentType:   "worker",
+					DeviceClassName: "gpu.intel.com",
+				},
+			},
+		},
+	}
+
+	got := roundTripFromV1alpha1(t, src)
+	if diff := cmp.Diff(src, got, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("standalone DRA round-trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
 // TestDGD_FromV1alpha1_FailoverEnabledFalseEmptyPayload targets the
 // sibling branch for Failover.
 func TestDGD_FromV1alpha1_FailoverEnabledFalseEmptyPayload(t *testing.T) {

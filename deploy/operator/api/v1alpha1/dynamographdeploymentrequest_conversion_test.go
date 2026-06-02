@@ -19,6 +19,7 @@ package v1alpha1
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -73,9 +74,10 @@ func newV1alpha1DGDR() *DynamoGraphDeploymentRequest {
 			},
 			EnableGPUDiscovery: &trueVal,
 			DeploymentOverrides: &DeploymentOverridesSpec{
-				Name:      "my-dgd",
-				Namespace: "prod",
-				Labels:    map[string]string{"team": "ml"},
+				Name:            "my-dgd",
+				Namespace:       "prod",
+				Labels:          map[string]string{"team": "ml"},
+				DeviceClassName: "gpu.intel.com",
 			},
 		},
 		Status: DynamoGraphDeploymentRequestStatus{
@@ -230,6 +232,9 @@ func TestConvertTo_SpecFields(t *testing.T) {
 	// DeploymentOverrides → annotation
 	if dst.Annotations[legacyAnnDGDRDeployOverrides] == "" {
 		t.Error("legacyAnnDGDRDeployOverrides annotation is empty")
+	}
+	if !strings.Contains(dst.Annotations[legacyAnnDGDRDeployOverrides], `"deviceClassName":"gpu.intel.com"`) {
+		t.Fatalf("legacyAnnDGDRDeployOverrides annotation missing deviceClassName: %s", dst.Annotations[legacyAnnDGDRDeployOverrides])
 	}
 }
 

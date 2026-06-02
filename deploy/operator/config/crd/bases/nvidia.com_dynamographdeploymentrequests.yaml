@@ -109,6 +109,12 @@ spec:
                         type: string
                       description: Annotations are additional annotations to add to the DynamoGraphDeployment metadata.
                       type: object
+                    deviceClassName:
+                      description: |-
+                        DeviceClassName is the DRA DeviceClass for standalone GPU allocation.
+                        When set, worker-like services in the generated DynamoGraphDeployment use
+                        standalone DRA with this DeviceClass.
+                      type: string
                     labels:
                       additionalProperties:
                         type: string

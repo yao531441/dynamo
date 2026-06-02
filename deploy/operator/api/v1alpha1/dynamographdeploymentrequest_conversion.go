@@ -358,11 +358,12 @@ func saveDGDRAlphaOnlySpec(src *DynamoGraphDeploymentRequestSpec, save *DynamoGr
 	save.ProfilingConfig.OutputPVC = src.ProfilingConfig.OutputPVC
 	if src.DeploymentOverrides != nil {
 		overrides := &DeploymentOverridesSpec{
-			Name:         src.DeploymentOverrides.Name,
-			Namespace:    src.DeploymentOverrides.Namespace,
-			Labels:       maps.Clone(src.DeploymentOverrides.Labels),
-			Annotations:  maps.Clone(src.DeploymentOverrides.Annotations),
-			WorkersImage: src.DeploymentOverrides.WorkersImage,
+			Name:            src.DeploymentOverrides.Name,
+			Namespace:       src.DeploymentOverrides.Namespace,
+			Labels:          maps.Clone(src.DeploymentOverrides.Labels),
+			Annotations:     maps.Clone(src.DeploymentOverrides.Annotations),
+			WorkersImage:    src.DeploymentOverrides.WorkersImage,
+			DeviceClassName: src.DeploymentOverrides.DeviceClassName,
 		}
 		if !apiequality.Semantic.DeepEqual(*overrides, DeploymentOverridesSpec{}) {
 			save.DeploymentOverrides = overrides
@@ -584,17 +585,19 @@ func saveDGDRLegacyDeploymentOverridesAnnotation(src *DeploymentOverridesSpec, d
 		return
 	}
 	overrides := struct {
-		Name        string            `json:"name,omitempty"`
-		Namespace   string            `json:"namespace,omitempty"`
-		Labels      map[string]string `json:"labels,omitempty"`
-		Annotations map[string]string `json:"annotations,omitempty"`
+		Name            string            `json:"name,omitempty"`
+		Namespace       string            `json:"namespace,omitempty"`
+		Labels          map[string]string `json:"labels,omitempty"`
+		Annotations     map[string]string `json:"annotations,omitempty"`
+		DeviceClassName string            `json:"deviceClassName,omitempty"`
 	}{
-		Name:        src.Name,
-		Namespace:   src.Namespace,
-		Labels:      src.Labels,
-		Annotations: src.Annotations,
+		Name:            src.Name,
+		Namespace:       src.Namespace,
+		Labels:          src.Labels,
+		Annotations:     src.Annotations,
+		DeviceClassName: src.DeviceClassName,
 	}
-	if overrides.Name == "" && overrides.Namespace == "" && len(overrides.Labels) == 0 && len(overrides.Annotations) == 0 {
+	if overrides.Name == "" && overrides.Namespace == "" && len(overrides.Labels) == 0 && len(overrides.Annotations) == 0 && overrides.DeviceClassName == "" {
 		return
 	}
 	if data, err := json.Marshal(overrides); err == nil {
@@ -687,11 +690,12 @@ func restoreDGDRAlphaOnlySpec(restored *DynamoGraphDeploymentRequestSpec, dst *D
 	dst.ProfilingConfig.OutputPVC = restored.ProfilingConfig.OutputPVC
 	if restored.DeploymentOverrides != nil {
 		dst.DeploymentOverrides = &DeploymentOverridesSpec{
-			Name:         restored.DeploymentOverrides.Name,
-			Namespace:    restored.DeploymentOverrides.Namespace,
-			Labels:       maps.Clone(restored.DeploymentOverrides.Labels),
-			Annotations:  maps.Clone(restored.DeploymentOverrides.Annotations),
-			WorkersImage: restored.DeploymentOverrides.WorkersImage,
+			Name:            restored.DeploymentOverrides.Name,
+			Namespace:       restored.DeploymentOverrides.Namespace,
+			Labels:          maps.Clone(restored.DeploymentOverrides.Labels),
+			Annotations:     maps.Clone(restored.DeploymentOverrides.Annotations),
+			WorkersImage:    restored.DeploymentOverrides.WorkersImage,
+			DeviceClassName: restored.DeploymentOverrides.DeviceClassName,
 		}
 	}
 }
@@ -1029,17 +1033,19 @@ func restoreDGDRLegacySpokeSpec(obj metav1.Object) *DynamoGraphDeploymentRequest
 	}
 	if v, ok := getAnnFromObj(obj, legacyAnnDGDRDeployOverrides); ok && v != "" {
 		var overrides struct {
-			Name        string            `json:"name,omitempty"`
-			Namespace   string            `json:"namespace,omitempty"`
-			Labels      map[string]string `json:"labels,omitempty"`
-			Annotations map[string]string `json:"annotations,omitempty"`
+			Name            string            `json:"name,omitempty"`
+			Namespace       string            `json:"namespace,omitempty"`
+			Labels          map[string]string `json:"labels,omitempty"`
+			Annotations     map[string]string `json:"annotations,omitempty"`
+			DeviceClassName string            `json:"deviceClassName,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(v), &overrides); err == nil {
 			restored.DeploymentOverrides = &DeploymentOverridesSpec{
-				Name:        overrides.Name,
-				Namespace:   overrides.Namespace,
-				Labels:      overrides.Labels,
-				Annotations: overrides.Annotations,
+				Name:            overrides.Name,
+				Namespace:       overrides.Namespace,
+				Labels:          overrides.Labels,
+				Annotations:     overrides.Annotations,
+				DeviceClassName: overrides.DeviceClassName,
 			}
 		}
 	}

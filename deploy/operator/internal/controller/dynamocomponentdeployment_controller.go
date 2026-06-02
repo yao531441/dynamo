@@ -183,23 +183,23 @@ func (r *DynamoComponentDeploymentReconciler) Reconcile(ctx context.Context, req
 		}
 	}
 
-	// Sync GMS ResourceClaimTemplate before creating workload resources
+	// Sync DRA ResourceClaimTemplate before creating workload resources.
 	if r.RuntimeConfig.DRAEnabled {
 		serviceName := dynamoComponentDeployment.Spec.ServiceName
 		if serviceName == "" {
 			serviceName = dynamoComponentDeployment.Name
 		}
 		spec := &dynamoComponentDeployment.Spec.DynamoComponentDeploymentSharedSpec
-		gpuCount, deviceClassName := dra.ExtractGPUParams(spec.GPUMemoryService, spec.Resources)
+		draConfig := dynamo.ResolveDRAConfigForComponent(spec)
 		claimTemplateName := dra.ResourceClaimTemplateName(dynamoComponentDeployment.GetParentGraphDeploymentName(), serviceName)
 		_, _, err = commonController.SyncResource(ctx, r, dynamoComponentDeployment, func(ctx context.Context) (*resourcev1.ResourceClaimTemplate, bool, error) {
-			return dra.GenerateResourceClaimTemplate(ctx, r.Client, claimTemplateName, dynamoComponentDeployment.Namespace, gpuCount, deviceClassName)
+			return dra.GenerateResourceClaimTemplate(ctx, r.Client, claimTemplateName, dynamoComponentDeployment.Namespace, draConfig.GPUCount, draConfig.DeviceClassName)
 		})
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to sync GMS ResourceClaimTemplate: %w", err)
+			return ctrl.Result{}, fmt.Errorf("failed to sync DRA ResourceClaimTemplate: %w", err)
 		}
-	} else if dynamoComponentDeployment.Spec.GPUMemoryService != nil && dynamoComponentDeployment.Spec.GPUMemoryService.Enabled {
-		return ctrl.Result{}, fmt.Errorf("gpuMemoryService requires DRA (Dynamic Resource Allocation), but the resource.k8s.io API group is not available on this cluster (requires Kubernetes 1.32+)")
+	} else if dynamo.RequiresDRAForComponent(&dynamoComponentDeployment.Spec.DynamoComponentDeploymentSharedSpec) {
+		return ctrl.Result{}, fmt.Errorf("gpuMemoryService or deviceClassName requires DRA (Dynamic Resource Allocation), but the resource.k8s.io API group is not available on this cluster (requires Kubernetes 1.32+)")
 	}
 
 	// Create the appropriate workload resource based on deployment type

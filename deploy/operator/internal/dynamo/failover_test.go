@@ -281,21 +281,27 @@ func TestGetGPUCount(t *testing.T) {
 	}
 }
 
-func TestGetDeviceClassName(t *testing.T) {
+func TestResolveDeviceClassForComponent(t *testing.T) {
 	tests := []struct {
-		name      string
-		resources *v1alpha1.Resources
-		want      string
+		name string
+		spec *v1alpha1.DynamoComponentDeploymentSharedSpec
+		want string
 	}{
-		{"nil resources", nil, "gpu.nvidia.com"},
-		{"nil limits", &v1alpha1.Resources{}, "gpu.nvidia.com"},
-		{"empty gpuType", &v1alpha1.Resources{Limits: &v1alpha1.ResourceItem{}}, "gpu.nvidia.com"},
-		{"custom gpuType", &v1alpha1.Resources{Limits: &v1alpha1.ResourceItem{GPUType: "gpu.nvidia.com/h100"}}, "gpu.nvidia.com/h100"},
+		{"nil spec", nil, ""},
+		{"standalone dra", &v1alpha1.DynamoComponentDeploymentSharedSpec{DeviceClassName: "gpu.intel.com"}, "gpu.intel.com"},
+		{"gms defaults to nvidia", &v1alpha1.DynamoComponentDeploymentSharedSpec{GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{Enabled: true}}, dra.DefaultDeviceClassName},
+		{"gms device class overrides standalone", &v1alpha1.DynamoComponentDeploymentSharedSpec{
+			DeviceClassName: "gpu.intel.com",
+			GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{
+				Enabled:         true,
+				DeviceClassName: "gpu.nvidia.com/h100",
+			},
+		}, "gpu.nvidia.com/h100"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, getDeviceClassName(tt.resources))
+			assert.Equal(t, tt.want, ResolveDeviceClassForComponent(tt.spec))
 		})
 	}
 }
@@ -367,28 +373,37 @@ func TestGmsRCTName(t *testing.T) {
 }
 
 func TestGmsResourceClaimTemplateConfigs_SingleNode(t *testing.T) {
-	resources := &v1alpha1.Resources{
-		Limits: &v1alpha1.ResourceItem{GPU: "8", GPUType: "gpu.nvidia.com/h100"},
+	component := &v1alpha1.DynamoComponentDeploymentSharedSpec{
+		Resources: &v1alpha1.Resources{
+			Limits: &v1alpha1.ResourceItem{GPU: "8", GPUType: "gpu.nvidia.com/h100"},
+		},
+		GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{Enabled: true},
 	}
 	roles := []ServiceRole{
 		{Name: "svc-gms-0", Role: RoleGMS, Rank: 0, Replicas: 1},
 		{Name: "svc", Role: RoleMain, Rank: 0, Replicas: 2},
 	}
 
-	configs := gmsResourceClaimTemplateConfigs("svc", resources, roles)
+	configs := gmsResourceClaimTemplateConfigs("svc", component, roles)
 
 	require.Len(t, configs, 1)
 	assert.Equal(t, "svc-gpu-rank-0", configs[0].Name)
 
 	req := configs[0].TemplateSpec.Spec.Devices.Requests[0]
 	require.NotNil(t, req.Exactly)
-	assert.Equal(t, "gpu.nvidia.com/h100", req.Exactly.DeviceClassName)
+	assert.Equal(t, dra.DefaultDeviceClassName, req.Exactly.DeviceClassName)
 	assert.Equal(t, int64(8), req.Exactly.Count)
 }
 
 func TestGmsResourceClaimTemplateConfigs_Multinode(t *testing.T) {
-	resources := &v1alpha1.Resources{
-		Limits: &v1alpha1.ResourceItem{GPU: "4"},
+	component := &v1alpha1.DynamoComponentDeploymentSharedSpec{
+		Resources: &v1alpha1.Resources{
+			Limits: &v1alpha1.ResourceItem{GPU: "4"},
+		},
+		GPUMemoryService: &v1alpha1.GPUMemoryServiceSpec{
+			Enabled:         true,
+			DeviceClassName: "gpu.intel.com",
+		},
 	}
 	roles := []ServiceRole{
 		{Name: "svc-gms-0", Role: RoleGMS, Rank: 0, Replicas: 1},
@@ -397,7 +412,7 @@ func TestGmsResourceClaimTemplateConfigs_Multinode(t *testing.T) {
 		{Name: "svc-wkr-1", Role: RoleWorker, Rank: 1, Replicas: 3},
 	}
 
-	configs := gmsResourceClaimTemplateConfigs("svc", resources, roles)
+	configs := gmsResourceClaimTemplateConfigs("svc", component, roles)
 
 	require.Len(t, configs, 2)
 	assert.Equal(t, "svc-gpu-rank-0", configs[0].Name)
@@ -405,8 +420,27 @@ func TestGmsResourceClaimTemplateConfigs_Multinode(t *testing.T) {
 
 	req := configs[1].TemplateSpec.Spec.Devices.Requests[0]
 	require.NotNil(t, req.Exactly)
-	assert.Equal(t, "gpu.nvidia.com", req.Exactly.DeviceClassName)
+	assert.Equal(t, "gpu.intel.com", req.Exactly.DeviceClassName)
 	assert.Equal(t, int64(4), req.Exactly.Count)
+}
+
+func TestComponentResourceClaimTemplateConfigs_StandaloneDRA(t *testing.T) {
+	component := &v1alpha1.DynamoComponentDeploymentSharedSpec{
+		DeviceClassName: "gpu.intel.com",
+		Resources: &v1alpha1.Resources{
+			Limits: &v1alpha1.ResourceItem{GPU: "2"},
+		},
+	}
+
+	configs := componentResourceClaimTemplateConfigs("test-dgd", "worker", component)
+
+	require.Len(t, configs, 1)
+	assert.Equal(t, "test-dgd-worker-gpu", configs[0].Name)
+
+	req := configs[0].TemplateSpec.Spec.Devices.Requests[0]
+	require.NotNil(t, req.Exactly)
+	assert.Equal(t, "gpu.intel.com", req.Exactly.DeviceClassName)
+	assert.Equal(t, int64(2), req.Exactly.Count)
 }
 
 func TestGmsResourceSharingEntries_SingleNode(t *testing.T) {

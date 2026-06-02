@@ -662,38 +662,37 @@ func (r *DynamoGraphDeploymentReconciler) reconcileGroveScaling(ctx context.Cont
 	return nil
 }
 
-// reconcileGMSResourceClaimTemplates syncs one ResourceClaimTemplate per
+// reconcileDRAResourceClaimTemplates syncs one ResourceClaimTemplate per
 // service when DRA is available, and otherwise fails fast if any service
 // needs DRA-backed GPU allocation.
 //
-// Both the GMS sidecar (gpuMemoryService.enabled=true) and inter-pod GMS
-// failover (failover.mode=interPod) allocate GPUs via DRA ResourceClaims.
-// Without DRA, pods would be admitted by the webhook but silently reference
+// This includes intra-pod GMS, inter-pod GMS, and standalone DRA. Without DRA,
+// pods would be admitted by the webhook but silently reference
 // ResourceClaimTemplates that reconcile never creates, producing a confusing
 // "resourceclaim not found" at schedule time. We fail fast here so the user
 // gets an actionable error instead.
-func (r *DynamoGraphDeploymentReconciler) reconcileGMSResourceClaimTemplates(ctx context.Context, dynamoDeployment *nvidiacomv1alpha1.DynamoGraphDeployment) error {
+func (r *DynamoGraphDeploymentReconciler) reconcileDRAResourceClaimTemplates(ctx context.Context, dynamoDeployment *nvidiacomv1alpha1.DynamoGraphDeployment) error {
 	logger := log.FromContext(ctx)
 
 	if !r.RuntimeConfig.DRAEnabled {
 		for _, component := range dynamoDeployment.Spec.Services {
-			if (component.GPUMemoryService != nil && component.GPUMemoryService.Enabled) ||
+			if dynamo.RequiresDRAForComponent(component) ||
 				component.IsInterPodFailoverEnabled() {
-				return fmt.Errorf("gpuMemoryService / inter-pod GMS failover requires DRA (Dynamic Resource Allocation), but DRA is not available (either the resource.k8s.io API group is not registered on this cluster, which requires Kubernetes 1.32+, or DRA has been explicitly disabled in the operator configuration)")
+				return fmt.Errorf("gpuMemoryService, deviceClassName, or inter-pod GMS failover requires DRA (Dynamic Resource Allocation), but DRA is not available (either the resource.k8s.io API group is not registered on this cluster, which requires Kubernetes 1.32+, or DRA has been explicitly disabled in the operator configuration)")
 			}
 		}
 		return nil
 	}
 
 	for serviceName, component := range dynamoDeployment.Spec.Services {
-		gpuCount, deviceClassName := dra.ExtractGPUParams(component.GPUMemoryService, component.Resources)
+		draConfig := dynamo.ResolveDRAConfigForComponent(component)
 		claimTemplateName := dra.ResourceClaimTemplateName(dynamoDeployment.Name, serviceName)
 		_, _, err := commoncontroller.SyncResource(ctx, r, dynamoDeployment, func(ctx context.Context) (*resourcev1.ResourceClaimTemplate, bool, error) {
-			return dra.GenerateResourceClaimTemplate(ctx, r.Client, claimTemplateName, dynamoDeployment.Namespace, gpuCount, deviceClassName)
+			return dra.GenerateResourceClaimTemplate(ctx, r.Client, claimTemplateName, dynamoDeployment.Namespace, draConfig.GPUCount, draConfig.DeviceClassName)
 		})
 		if err != nil {
-			logger.Error(err, "failed to sync GMS ResourceClaimTemplate", "service", serviceName)
-			return fmt.Errorf("failed to sync GMS ResourceClaimTemplate for %s: %w", serviceName, err)
+			logger.Error(err, "failed to sync DRA ResourceClaimTemplate", "service", serviceName)
+			return fmt.Errorf("failed to sync DRA ResourceClaimTemplate for %s: %w", serviceName, err)
 		}
 	}
 	return nil
@@ -702,7 +701,7 @@ func (r *DynamoGraphDeploymentReconciler) reconcileGMSResourceClaimTemplates(ctx
 func (r *DynamoGraphDeploymentReconciler) reconcileGroveResources(ctx context.Context, dynamoDeployment *nvidiacomv1alpha1.DynamoGraphDeployment, restartState *dynamo.RestartState, checkpointInfos map[string]*checkpoint.CheckpointInfo) (ReconcileResult, error) {
 	logger := log.FromContext(ctx)
 
-	if err := r.reconcileGMSResourceClaimTemplates(ctx, dynamoDeployment); err != nil {
+	if err := r.reconcileDRAResourceClaimTemplates(ctx, dynamoDeployment); err != nil {
 		return ReconcileResult{}, err
 	}
 

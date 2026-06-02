@@ -980,6 +980,16 @@ spec:
                       componentType:
                         description: ComponentType indicates the role of this component (for example, "main").
                         type: string
+                      deviceClassName:
+                        description: |-
+                          DeviceClassName is the DRA DeviceClass for standalone GPU allocation.
+                          When set, the component requests GPUs through a DRA ResourceClaim even if
+                          gpuMemoryService is not enabled.
+
+                          Empty string disables standalone DRA. When gpuMemoryService is enabled,
+                          gpuMemoryService.deviceClassName takes precedence to preserve existing GMS
+                          compatibility behavior.
+                        type: string
                       dynamoNamespace:
                         description: |-
                           DynamoNamespace is deprecated and will be removed in a future version.
@@ -11889,6 +11899,16 @@ spec:
                         required:
                           - pvcName
                         type: object
+                      deviceClassName:
+                        description: |-
+                          deviceClassName is the DRA DeviceClass for standalone GPU allocation.
+                          When set, the component requests GPUs through a DRA ResourceClaim even if
+                          experimental.gpuMemoryService is not enabled.
+
+                          Empty string disables standalone DRA. When experimental.gpuMemoryService
+                          is enabled, experimental.gpuMemoryService.deviceClassName takes
+                          precedence to preserve existing GMS compatibility behavior.
+                        type: string
                       eppConfig:
                         description: |-
                           eppConfig holds EPP-specific configuration for Endpoint Picker Plugin

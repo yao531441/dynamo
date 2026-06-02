@@ -78,8 +78,9 @@ const (
 	// Annotation keys for v1alpha1 round-trip compatibility.
 	// The conversion layer stores v1alpha1 fields that have no v1beta1 spec equivalent
 	// as annotations so the controller can still honour them for converted resources.
-	AnnotationConfigMapRef = "nvidia.com/dgdr-config-map-ref"
-	AnnotationOutputPVC    = "nvidia.com/dgdr-output-pvc"
+	AnnotationConfigMapRef    = "nvidia.com/dgdr-config-map-ref"
+	AnnotationOutputPVC       = "nvidia.com/dgdr-output-pvc"
+	AnnotationDeployOverrides = "nvidia.com/dgdr-deployment-overrides"
 
 	// Size limits
 	MaxAnnotationSize = 250000 // ~250KB, below K8s 256KB limit
@@ -1747,6 +1748,14 @@ type configMapKeySelector struct {
 	Key  string `json:"key,omitempty"`
 }
 
+type deploymentOverridesAnnotation struct {
+	Name            string            `json:"name,omitempty"`
+	Namespace       string            `json:"namespace,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+	DeviceClassName string            `json:"deviceClassName,omitempty"`
+}
+
 // configMapRefFromAnnotation reads the ConfigMap reference from the round-trip annotation.
 // Returns nil for native v1beta1 resources (no annotation present).
 func configMapRefFromAnnotation(dgdr *nvidiacomv1beta1.DynamoGraphDeploymentRequest) *configMapKeySelector {
@@ -1771,6 +1780,21 @@ func outputPVCFromAnnotation(dgdr *nvidiacomv1beta1.DynamoGraphDeploymentRequest
 		return ""
 	}
 	return dgdr.Annotations[AnnotationOutputPVC]
+}
+
+func deploymentOverridesFromAnnotation(dgdr *nvidiacomv1beta1.DynamoGraphDeploymentRequest) *deploymentOverridesAnnotation {
+	if dgdr.Annotations == nil {
+		return nil
+	}
+	raw, ok := dgdr.Annotations[AnnotationDeployOverrides]
+	if !ok || raw == "" {
+		return nil
+	}
+	var overrides deploymentOverridesAnnotation
+	if err := json.Unmarshal([]byte(raw), &overrides); err != nil {
+		return nil
+	}
+	return &overrides
 }
 
 // checkProfilingJobStatus checks if the profiling job has completed
@@ -1955,6 +1979,19 @@ func (r *DynamoGraphDeploymentRequestReconciler) generateDGDSpec(ctx context.Con
 	// DGDR identity instead, respecting an explicit override if the user set one.
 	dgd.Name = computeDGDName(dgdr)
 
+	if overrides := deploymentOverridesFromAnnotation(dgdr); overrides != nil && overrides.DeviceClassName != "" {
+		for serviceName, service := range dgd.Spec.Services {
+			if service == nil {
+				continue
+			}
+			if !isDGDRWorkerService(service) {
+				continue
+			}
+			service.DeviceClassName = overrides.DeviceClassName
+			dgd.Spec.Services[serviceName] = service
+		}
+	}
+
 	logger.Info("Parsed profiling output", "profilerDGDName", dgd.Name, "additionalResources", len(additionalResources))
 
 	if len(additionalResources) > 0 {
@@ -2001,6 +2038,19 @@ func (r *DynamoGraphDeploymentRequestReconciler) generateDGDSpec(ctx context.Con
 		return nil, "", fmt.Errorf("failed to update DGDR with generated DGD annotation: %w", err)
 	}
 	return profilingResults, dgd.Name, nil
+}
+
+func isDGDRWorkerService(service *dgdv1alpha1.DynamoComponentDeploymentSharedSpec) bool {
+	if service == nil {
+		return false
+	}
+	if service.ComponentType == consts.ComponentTypeWorker ||
+		service.ComponentType == consts.ComponentTypePrefill ||
+		service.ComponentType == consts.ComponentTypeDecode {
+		return true
+	}
+	return service.ComponentType == consts.ComponentTypeWorker &&
+		(service.SubComponentType == consts.ComponentTypePrefill || service.SubComponentType == consts.ComponentTypeDecode)
 }
 
 // extractParetoFromWebUIData parses webui_data.json and returns all Pareto-optimal

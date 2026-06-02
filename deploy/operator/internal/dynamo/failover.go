@@ -295,26 +295,43 @@ func getGPUCount(resources *v1alpha1.Resources) int32 {
 	return 0
 }
 
-// getDeviceClassName returns the DRA device class name from gpuType,
-// falling back to the default device class shipped with the NVIDIA DRA
-// driver. The literal "gpu.nvidia.com" is intentionally not duplicated
-// here — it is the single source of truth in the dra package.
-func getDeviceClassName(resources *v1alpha1.Resources) string {
-	if resources != nil && resources.Limits != nil && resources.Limits.GPUType != "" {
-		return resources.Limits.GPUType
-	}
-	return dra.DefaultDeviceClassName
-}
-
 // gmsRCTName returns a deterministic ResourceClaimTemplate name for a given rank.
 func gmsRCTName(serviceName string, rank int32) string {
 	return fmt.Sprintf("%s-gpu-rank-%d", serviceName, rank)
 }
 
+func resourceClaimTemplateConfig(name string, gpuCount int32, deviceClassName string) grovev1alpha1.ResourceClaimTemplateConfig {
+	return grovev1alpha1.ResourceClaimTemplateConfig{
+		Name: name,
+		TemplateSpec: resourcev1.ResourceClaimTemplateSpec{
+			Spec: resourcev1.ResourceClaimSpec{
+				Devices: resourcev1.DeviceClaim{
+					Requests: []resourcev1.DeviceRequest{
+						{
+							Name: "gpu",
+							Exactly: &resourcev1.ExactDeviceRequest{
+								DeviceClassName: deviceClassName,
+								AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+								Count:           int64(gpuCount),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // gmsResourceClaimTemplateConfigs builds one PCS-level ResourceClaimTemplateConfig
 // per rank. Each RCT has the same GPU spec but a distinct per-rank name so that
 // each rank's GMS + engine pods get their own ResourceClaim.
-func gmsResourceClaimTemplateConfigs(serviceName string, resources *v1alpha1.Resources, roles []ServiceRole) []grovev1alpha1.ResourceClaimTemplateConfig {
+func gmsResourceClaimTemplateConfigs(serviceName string, component *v1alpha1.DynamoComponentDeploymentSharedSpec, roles []ServiceRole) []grovev1alpha1.ResourceClaimTemplateConfig {
+	gpuCount := getGPUCount(component.Resources)
+	deviceClassName := resolveGMSDeviceClass(component.GPUMemoryService)
+	if gpuCount <= 0 || deviceClassName == "" {
+		return nil
+	}
+
 	seen := map[int32]bool{}
 	configs := make([]grovev1alpha1.ResourceClaimTemplateConfig, 0, len(roles))
 	for _, r := range roles {
@@ -322,27 +339,23 @@ func gmsResourceClaimTemplateConfigs(serviceName string, resources *v1alpha1.Res
 			continue
 		}
 		seen[r.Rank] = true
-		configs = append(configs, grovev1alpha1.ResourceClaimTemplateConfig{
-			Name: gmsRCTName(serviceName, r.Rank),
-			TemplateSpec: resourcev1.ResourceClaimTemplateSpec{
-				Spec: resourcev1.ResourceClaimSpec{
-					Devices: resourcev1.DeviceClaim{
-						Requests: []resourcev1.DeviceRequest{
-							{
-								Name: "gpu",
-								Exactly: &resourcev1.ExactDeviceRequest{
-									DeviceClassName: getDeviceClassName(resources),
-									AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-									Count:           int64(getGPUCount(resources)),
-								},
-							},
-						},
-					},
-				},
-			},
-		})
+		configs = append(configs, resourceClaimTemplateConfig(gmsRCTName(serviceName, r.Rank), gpuCount, deviceClassName))
 	}
 	return configs
+}
+
+func componentResourceClaimTemplateConfigs(parentName, serviceName string, component *v1alpha1.DynamoComponentDeploymentSharedSpec) []grovev1alpha1.ResourceClaimTemplateConfig {
+	draConfig := ResolveDRAConfigForComponent(component)
+	if draConfig.GPUCount <= 0 || draConfig.DeviceClassName == "" {
+		return nil
+	}
+	return []grovev1alpha1.ResourceClaimTemplateConfig{
+		resourceClaimTemplateConfig(
+			dra.ResourceClaimTemplateName(parentName, serviceName),
+			int32(draConfig.GPUCount),
+			draConfig.DeviceClassName,
+		),
+	}
 }
 
 // gmsResourceSharingEntries builds one PCSG-level ResourceSharingSpec per rank.

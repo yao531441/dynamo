@@ -257,7 +257,8 @@ func fuzzAlphaDGDRSpec(s *v1alpha1.DynamoGraphDeploymentRequestSpec, c randfill.
 		if s.DeploymentOverrides.Name == "" &&
 			s.DeploymentOverrides.Namespace == "" &&
 			len(s.DeploymentOverrides.Labels) == 0 &&
-			len(s.DeploymentOverrides.Annotations) == 0 {
+			len(s.DeploymentOverrides.Annotations) == 0 &&
+			s.DeploymentOverrides.DeviceClassName == "" {
 			s.DeploymentOverrides = nil
 		}
 	}
@@ -275,6 +276,14 @@ func fuzzAlphaDGDRStatus(s *v1alpha1.DynamoGraphDeploymentRequestStatus, c randf
 		v1alpha1.DGDRStateDeploymentDeleted,
 		v1alpha1.DGDRStateFailed,
 	)
+
+	if s.Deployment != nil &&
+		s.Deployment.Name == "" &&
+		s.Deployment.Namespace == "" &&
+		s.Deployment.State == "" &&
+		!s.Deployment.Created {
+		s.Deployment = nil
+	}
 }
 
 func fuzzBetaDGDRSpec(s *v1beta1.DynamoGraphDeploymentRequestSpec, c randfill.Continue) {
