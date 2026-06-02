@@ -3695,3 +3695,29 @@ var _ = Describe("DGDR Image Pull Error Detection", func() {
 		})
 	})
 })
+
+var _ = Describe("gpuSkuToDeviceClassName", func() {
+	It("Should map Intel b60 to gpu.intel.com", func() {
+		Expect(gpuSkuToDeviceClassName("b60")).To(Equal("gpu.intel.com"))
+	})
+
+	It("Should map AMD GPUs to gpu.amd.com", func() {
+		Expect(gpuSkuToDeviceClassName("mi200")).To(Equal("gpu.amd.com"))
+		Expect(gpuSkuToDeviceClassName("mi300")).To(Equal("gpu.amd.com"))
+	})
+
+	It("Should map NVIDIA GPUs to gpu.nvidia.com", func() {
+		Expect(gpuSkuToDeviceClassName("h200_sxm")).To(Equal("gpu.nvidia.com"))
+		Expect(gpuSkuToDeviceClassName("h100_sxm")).To(Equal("gpu.nvidia.com"))
+		Expect(gpuSkuToDeviceClassName("a100_sxm")).To(Equal("gpu.nvidia.com"))
+		Expect(gpuSkuToDeviceClassName("l40s")).To(Equal("gpu.nvidia.com"))
+	})
+
+	It("Should return empty string for unknown SKU", func() {
+		Expect(gpuSkuToDeviceClassName("unknown_gpu")).To(Equal(""))
+	})
+
+	It("Should return empty string for empty SKU", func() {
+		Expect(gpuSkuToDeviceClassName("")).To(Equal(""))
+	})
+})

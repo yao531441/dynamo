@@ -1979,7 +1979,18 @@ func (r *DynamoGraphDeploymentRequestReconciler) generateDGDSpec(ctx context.Con
 	// DGDR identity instead, respecting an explicit override if the user set one.
 	dgd.Name = computeDGDName(dgdr)
 
+	// Determine DeviceClassName for worker components:
+	// 1. Explicit override from user (highest priority)
+	// 2. Derived from gpuSku (e.g., b60 -> gpu.intel.com)
+	// If neither source provides a value, no injection occurs (preserves original behavior).
+	deviceClassName := ""
 	if overrides := deploymentOverridesFromAnnotation(dgdr); overrides != nil && overrides.DeviceClassName != "" {
+		deviceClassName = overrides.DeviceClassName
+	} else if dgdr.Spec.Hardware != nil && dgdr.Spec.Hardware.GPUSKU != "" {
+		deviceClassName = gpuSkuToDeviceClassName(string(dgdr.Spec.Hardware.GPUSKU))
+	}
+
+	if deviceClassName != "" {
 		for serviceName, service := range dgd.Spec.Services {
 			if service == nil {
 				continue
@@ -1987,9 +1998,10 @@ func (r *DynamoGraphDeploymentRequestReconciler) generateDGDSpec(ctx context.Con
 			if !isDGDRWorkerService(service) {
 				continue
 			}
-			service.DeviceClassName = overrides.DeviceClassName
+			service.DeviceClassName = deviceClassName
 			dgd.Spec.Services[serviceName] = service
 		}
+		logger.Info("Injected DeviceClassName for worker components", "deviceClassName", deviceClassName)
 	}
 
 	logger.Info("Parsed profiling output", "profilerDGDName", dgd.Name, "additionalResources", len(additionalResources))
@@ -2038,6 +2050,27 @@ func (r *DynamoGraphDeploymentRequestReconciler) generateDGDSpec(ctx context.Con
 		return nil, "", fmt.Errorf("failed to update DGDR with generated DGD annotation: %w", err)
 	}
 	return profilingResults, dgd.Name, nil
+}
+
+// gpuSkuToDeviceClassName maps a GPU SKU to the corresponding DRA DeviceClass.
+// NVIDIA GPUs return "gpu.nvidia.com" (compatible with existing behavior).
+// Intel XPU returns "gpu.intel.com".
+// Unknown/other SKUs return empty string (no injection, preserves original behavior).
+func gpuSkuToDeviceClassName(gpuSku string) string {
+	switch gpuSku {
+	case "b60":
+		return "gpu.intel.com"
+	case "mi200", "mi300":
+		return "gpu.amd.com"
+	// NVIDIA GPUs - all known NVIDIA SKUs map to gpu.nvidia.com
+	case "gb200_sxm", "b200_sxm", "h200_sxm", "h100_sxm", "h100_pcie",
+		"a100_sxm", "a100_pcie", "a30", "l40s", "l40", "l4",
+		"v100_sxm", "v100_pcie", "t4":
+		return "gpu.nvidia.com"
+	default:
+		// Unknown SKU - return empty to preserve original behavior
+		return ""
+	}
 }
 
 func isDGDRWorkerService(service *dgdv1alpha1.DynamoComponentDeploymentSharedSpec) bool {
