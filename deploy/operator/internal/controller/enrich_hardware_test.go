@@ -77,6 +77,14 @@ func dcgmPod(name, ip string) *corev1.Pod {
 	}
 }
 
+func xpumdPod(name, ip string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "intel-xpum",
+			Labels: map[string]string{gpupkg.LabelAppKubernetesName: gpupkg.LabelValueXPUMD}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: ip},
+	}
+}
+
 func TestGPUDiscoveryEnabledDefaults(t *testing.T) {
 	assert.True(t, (*DynamoGraphDeploymentRequestReconciler)(nil).gpuDiscoveryEnabled())
 	assert.True(t, (&DynamoGraphDeploymentRequestReconciler{}).gpuDiscoveryEnabled())
@@ -276,6 +284,47 @@ func TestEnrichHardwareFromDiscovery(t *testing.T) {
 			assert.Equal(t, tt.wantTotalGPUs, *dgdr.Spec.Hardware.TotalGPUs)
 		})
 	}
+}
+
+func TestEnrichHardwareFromDiscovery_B60UsesXPUMD(t *testing.T) {
+	t.Setenv("INTEL_XPU_METRICS_ENDPOINT_TEMPLATE", "")
+
+	r := newFakeReconciler(xpumdPod("xpumd", "10.0.0.2"))
+	r.GPUDiscovery = gpupkg.NewGPUDiscoveryWithScrapers(
+		func(ctx context.Context, endpoint string) (*gpupkg.GPUInfo, error) {
+			t.Fatalf("DCGM scraper should not be called for explicit B60 discovery")
+			return nil, nil
+		},
+		func(ctx context.Context, endpoint string) (*gpupkg.GPUInfo, error) {
+			assert.Contains(t, endpoint, "10.0.0.2:8080")
+			return &gpupkg.GPUInfo{
+				NodeName:    "xpu-node",
+				GPUsPerNode: 3,
+				Model:       "Intel(R) Graphics [0xe211]",
+				VRAMPerGPU:  24480,
+				System:      "b60",
+			}, nil
+		},
+	)
+	r.GPUDiscoveryCache = gpupkg.NewGPUDiscoveryCache()
+
+	dgdr := &nvidiacomv1beta1.DynamoGraphDeploymentRequest{
+		Spec: nvidiacomv1beta1.DynamoGraphDeploymentRequestSpec{
+			Hardware: &nvidiacomv1beta1.HardwareSpec{
+				GPUSKU: "b60",
+			},
+		},
+	}
+
+	changed, err := r.enrichHardwareFromDiscovery(context.Background(), dgdr)
+
+	require.NoError(t, err)
+	assert.True(t, changed)
+	require.NotNil(t, dgdr.Spec.Hardware)
+	assert.Equal(t, "b60", string(dgdr.Spec.Hardware.GPUSKU))
+	assert.Equal(t, 24480.0, *dgdr.Spec.Hardware.VRAMMB)
+	assert.Equal(t, int32(3), *dgdr.Spec.Hardware.NumGPUsPerNode)
+	assert.Equal(t, int32(3), *dgdr.Spec.Hardware.TotalGPUs)
 }
 
 func TestEnrichHardwareFromDiscovery_WritesOptionalHardwareMetadata(t *testing.T) {
