@@ -203,6 +203,112 @@ def enable_vllm_benchmark_mode(config_dict: dict) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Non-NVIDIA accelerator device-class derivation (standalone DRA)
+# ---------------------------------------------------------------------------
+
+# gpuSku -> DRA device class for *non-NVIDIA* accelerators. NVIDIA and unknown
+# SKUs are intentionally absent: leaving ``deviceClassName`` empty keeps NVIDIA
+# on its existing allocation path (GMS / implicit nvidia.com resources), so this
+# mapping never changes NVIDIA-observable behaviour.
+_SKU_TO_DEVICE_CLASS: dict[str, str] = {
+    "b60": "gpu.intel.com",
+    "mi200": "gpu.amd.com",
+    "mi300": "gpu.amd.com",
+}
+
+# gpuSku -> extra worker env required to target that accelerator. Intel XPU needs
+# ``VLLM_TARGET_DEVICE=xpu`` so vLLM selects its XPU runtime path. Other SKUs add
+# nothing here (the device class alone is sufficient).
+_SKU_TO_WORKER_ENV: dict[str, list[dict[str, str]]] = {
+    "b60": [{"name": "VLLM_TARGET_DEVICE", "value": "xpu"}],
+}
+
+
+def _normalize_gpu_sku(gpu_sku) -> str:
+    """Lower-cased SKU string from a ``GPUSKUType`` enum or raw string.
+
+    Returns ``""`` when *gpu_sku* is ``None`` so callers can treat the empty
+    string as "no recognised accelerator".
+    """
+    if gpu_sku is None:
+        return ""
+    return str(getattr(gpu_sku, "value", gpu_sku)).lower()
+
+
+def _append_env_if_absent(
+    main_container: dict, additions: list[dict[str, str]]
+) -> None:
+    """Append each ``additions`` env var to *main_container* only if absent.
+
+    Existing entries (e.g. a user-supplied ``VLLM_TARGET_DEVICE`` via DGD
+    overrides) are preserved so explicit intent always wins.
+    """
+    env_list = main_container.setdefault("env", [])
+    existing = {e.get("name") for e in env_list if isinstance(e, dict) and "name" in e}
+    for entry in additions:
+        if entry["name"] not in existing:
+            env_list.append(dict(entry))
+
+
+def apply_accelerator_device_class(config_dict: dict, gpu_sku) -> None:
+    """Set ``deviceClassName`` + accelerator env on GPU workers for non-NVIDIA SKUs.
+
+    Mutates *config_dict* in place. For NVIDIA or unknown SKUs this is a no-op,
+    so NVIDIA-observable behaviour is unchanged. For a recognised non-NVIDIA SKU
+    (e.g. Intel ``b60`` -> ``gpu.intel.com``), every worker service
+    (``componentType == "worker"``) that does not already declare a
+    ``deviceClassName`` gets the derived device class so the operator allocates
+    the GPU via standalone DRA instead of GMS. Intel SKUs additionally receive
+    ``VLLM_TARGET_DEVICE=xpu`` (and any future XPU flags) on the main container.
+
+    Idempotent: existing ``deviceClassName`` / env values (e.g. supplied by the
+    user via DGD overrides) are preserved. Workers that enable
+    ``gpuMemoryService`` are skipped: GMS owns its own DRA device class and the
+    operator rejects combining it with a standalone ``deviceClassName``.
+    """
+    device_class = _SKU_TO_DEVICE_CLASS.get(_normalize_gpu_sku(gpu_sku))
+    if not device_class:
+        return  # NVIDIA / unknown SKU -> no standalone-DRA injection.
+
+    worker_env = _SKU_TO_WORKER_ENV.get(_normalize_gpu_sku(gpu_sku), [])
+    services = config_dict.get("spec", {}).get("services", {})
+    if not isinstance(services, dict):
+        return
+
+    for svc_name, svc in services.items():
+        if not isinstance(svc, dict) or svc.get("componentType") != "worker":
+            continue
+        # A GMS-enabled worker owns its own DRA device class; the operator
+        # rejects deviceClassName combined with gpuMemoryService, so skip it
+        # rather than emit a config the webhook would reject (a non-NVIDIA
+        # gpuSku on a GMS worker is itself a contradictory input).
+        gms = svc.get("gpuMemoryService")
+        if isinstance(gms, dict) and gms.get("enabled"):
+            logger.warning(
+                "Skipping deviceClassName derivation for worker service %s: "
+                "gpuMemoryService is enabled (GMS cannot be combined with a "
+                "standalone deviceClassName).",
+                svc_name,
+            )
+            continue
+        # Preserve an explicit deviceClassName, including "" (PR-1's documented
+        # "standalone DRA off" opt-out); only derive when the key is absent.
+        if "deviceClassName" not in svc:
+            svc["deviceClassName"] = device_class
+            logger.info(
+                "Set deviceClassName=%s on worker service %s (gpuSku=%s).",
+                device_class,
+                svc_name,
+                _normalize_gpu_sku(gpu_sku),
+            )
+        if worker_env:
+            main_container = svc.setdefault("extraPodSpec", {}).setdefault(
+                "mainContainer", {}
+            )
+            _append_env_if_absent(main_container, worker_env)
+
+
 def generate_mocker_config(
     dgdr, aic_spec: Optional[AICInterpolationSpec] = None
 ) -> dict:

@@ -34,6 +34,7 @@ from dynamo.profiler.utils.config_modifiers.parallelization_mapping import (
 from dynamo.profiler.utils.config_modifiers.protocol import apply_dgd_overrides
 from dynamo.profiler.utils.defaults import SearchStrategy
 from dynamo.profiler.utils.dgd_generation import (
+    apply_accelerator_device_class,
     assemble_final_config,
     build_aic_interpolation_spec,
     build_aic_perf_model_spec,
@@ -52,6 +53,7 @@ from dynamo.profiler.utils.profile_common import (
     determine_picking_mode,
     get_profiling_job_tolerations,
     inject_tolerations_into_dgd,
+    is_mocker_enabled,
     needs_profile_data,
     picked_config_from_row,
     resolve_model_path,
@@ -96,6 +98,32 @@ def _apply_model_runtime_constraints_to_final_config(
         final_config = config_modifier.apply_model_runtime_constraints(
             final_config, model_name_or_path
         )
+    return final_config
+
+
+def _apply_device_class_to_final_config(
+    final_config: Any, dgdr: DynamoGraphDeploymentRequestSpec
+) -> Any:
+    """Derive non-NVIDIA worker ``deviceClassName`` + accelerator env from gpuSku.
+
+    Runs unconditionally on the final DGD so it also covers the common
+    non-mocker, non-planner path that ``assemble_final_config`` returns early.
+    No-op for NVIDIA / unknown SKUs, so NVIDIA-observable behaviour is unchanged.
+
+    Skipped when mocker is enabled: mocker workers are CPU-only simulators and
+    must not request real accelerators via DRA.
+    """
+    if not final_config or is_mocker_enabled(dgdr):
+        return final_config
+    if not (dgdr.hardware and dgdr.hardware.gpuSku):
+        return final_config
+
+    gpu_sku = dgdr.hardware.gpuSku
+    if isinstance(final_config, list):
+        if final_config and isinstance(final_config[-1], dict):
+            apply_accelerator_device_class(final_config[-1], gpu_sku)
+    elif isinstance(final_config, dict):
+        apply_accelerator_device_class(final_config, gpu_sku)
     return final_config
 
 
@@ -566,6 +594,11 @@ async def run_profile(
             resolved_backend,
             resolve_model_path(dgdr),
         )
+
+        # Derive non-NVIDIA worker device classes (e.g. Intel XPU -> gpu.intel.com)
+        # from the requested gpuSku so the operator allocates via standalone DRA.
+        # No-op for NVIDIA / unknown SKUs and for mocker deployments.
+        final_config = _apply_device_class_to_final_config(final_config, dgdr)
 
         # Propagate profiling-job tolerations to the final DGD (covers any
         # services added by assemble_final_config, e.g. Planner).
