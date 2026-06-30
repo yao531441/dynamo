@@ -419,6 +419,21 @@ func TestGmsResourceClaimTemplateConfigs_Multinode(t *testing.T) {
 	assert.Equal(t, int64(4), req.Exactly.Count)
 }
 
+func TestGmsResourceClaimTemplateConfigs_NoGPUReturnsError(t *testing.T) {
+	// A GMS component whose resources declare no GPU must fail fast instead of
+	// silently emitting ResourceClaimTemplates that request zero devices, which
+	// would break inter-pod GMS failover at runtime.
+	resources := corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceCPU: k8sresource.MustParse("4")}}
+	roles := []ServiceRole{
+		{Name: "svc-gms-0", Role: RoleGMS, Rank: 0, Replicas: 1},
+		{Name: "svc", Role: RoleMain, Rank: 0, Replicas: 2},
+	}
+
+	configs, err := gmsResourceClaimTemplateConfigs("VllmWorker", &v1beta1.GPUMemoryServiceSpec{}, resources, roles)
+	require.Error(t, err)
+	assert.Nil(t, configs)
+}
+
 func TestGmsResourceSharingEntries_SingleNode(t *testing.T) {
 	roles := []ServiceRole{
 		{Name: "svc-gms-0", Role: RoleGMS, Rank: 0, Replicas: 1},

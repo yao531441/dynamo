@@ -317,6 +317,13 @@ func gmsResourceClaimTemplateConfigs(serviceName string, gmsSpec *v1beta1.GPUMem
 	if err != nil {
 		return nil, err
 	}
+	// Fail fast on a non-positive GPU count. ExtractGPUCountFromResourceRequirements
+	// returns (0, nil) when the component declares no recognized GPU resource, which
+	// would otherwise produce ResourceClaimTemplates that request zero devices and
+	// silently break inter-pod GMS failover at runtime.
+	if gpuCount <= 0 {
+		return nil, fmt.Errorf("GMS component %q declares no GPU resources; inter-pod GMS failover requires at least one GPU to build per-rank ResourceClaimTemplates", serviceName)
+	}
 	seen := map[int32]bool{}
 	configs := make([]grovev1alpha1.ResourceClaimTemplateConfig, 0, len(roles))
 	for _, r := range roles {
