@@ -153,6 +153,10 @@ func ConvertFromDynamoComponentDeploymentSharedSpec(src *DynamoComponentDeployme
 	dst.GlobalDynamoNamespace = src.GlobalDynamoNamespace
 	dst.Replicas = src.Replicas
 
+	// Standalone DRA device class: a represented scalar on both versions, so it
+	// converts straight from live src.
+	dst.DeviceClassName = src.DeviceClassName
+
 	if src.Multinode != nil {
 		dst.Multinode = &v1beta1.MultinodeSpec{}
 		ConvertFromMultinodeSpec(src.Multinode, dst.Multinode)
@@ -499,6 +503,10 @@ func ConvertToDynamoComponentDeploymentSharedSpec(src *v1beta1.DynamoComponentDe
 	dst.ComponentType, dst.SubComponentType = sharedComponentTypeFromHub(src.ComponentType)
 	dst.GlobalDynamoNamespace = src.GlobalDynamoNamespace
 	dst.Replicas = src.Replicas
+
+	// Standalone DRA device class: a represented scalar on both versions, so it
+	// converts straight from live src.
+	dst.DeviceClassName = src.DeviceClassName
 
 	if src.Multinode != nil {
 		dst.Multinode = &MultinodeSpec{}

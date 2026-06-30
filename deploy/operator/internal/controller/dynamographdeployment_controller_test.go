@@ -495,9 +495,11 @@ func TestDynamoGraphDeploymentReconciler_reconcilePVCs(t *testing.T) {
 
 func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_DRAValidation(t *testing.T) {
 	tests := []struct {
-		name    string
-		spec    v1beta1.DynamoComponentDeploymentSharedSpec
-		wantErr bool
+		name           string
+		spec           v1beta1.DynamoComponentDeploymentSharedSpec
+		wantErr        bool
+		errContains    string
+		errNotContains string
 	}{
 		{
 			name: "intra-pod failover does not require DRA",
@@ -516,7 +518,9 @@ func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_DRAV
 					Failover: &v1beta1.FailoverSpec{Mode: v1beta1.GMSModeInterPod},
 				},
 			},
-			wantErr: true,
+			wantErr:        true,
+			errContains:    "gpuMemoryService / inter-pod GMS failover requires DRA",
+			errNotContains: "standalone",
 		},
 		{
 			name: "gpu memory service requires DRA",
@@ -526,7 +530,18 @@ func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_DRAV
 					GPUMemoryService: &v1beta1.GPUMemoryServiceSpec{},
 				},
 			},
-			wantErr: true,
+			wantErr:        true,
+			errContains:    "gpuMemoryService / inter-pod GMS failover requires DRA",
+			errNotContains: "standalone",
+		},
+		{
+			name: "standalone device class requires DRA",
+			spec: v1beta1.DynamoComponentDeploymentSharedSpec{
+				ComponentName:   "decode",
+				DeviceClassName: "gpu.intel.com",
+			},
+			wantErr:     true,
+			errContains: "standalone DRA device class requires DRA",
 		},
 	}
 
@@ -547,6 +562,12 @@ func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_DRAV
 			if tt.wantErr {
 				g.Expect(err).To(gomega.HaveOccurred())
 				g.Expect(err.Error()).To(gomega.ContainSubstring("requires DRA"))
+				if tt.errContains != "" {
+					g.Expect(err.Error()).To(gomega.ContainSubstring(tt.errContains))
+				}
+				if tt.errNotContains != "" {
+					g.Expect(err.Error()).NotTo(gomega.ContainSubstring(tt.errNotContains))
+				}
 				return
 			}
 			g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -621,6 +642,60 @@ func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_Tole
 	if err := r.reconcileGMSResourceClaimTemplates(ctx, dgd); err != nil {
 		t.Fatalf("reconcileGMSResourceClaimTemplates() returned error for non-GMS components: %v", err)
 	}
+}
+
+func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_CreatesStandaloneTemplate(t *testing.T) {
+	ctx := context.Background()
+	s := newDynamoGraphDeploymentControllerTestScheme(t)
+	dgd := &v1beta1.DynamoGraphDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-dgd", Namespace: "default"},
+		Spec: v1beta1.DynamoGraphDeploymentSpec{
+			Components: []v1beta1.DynamoComponentDeploymentSharedSpec{
+				{
+					ComponentName:   "decode",
+					ComponentType:   v1beta1.ComponentTypeDecode,
+					DeviceClassName: "gpu.intel.com",
+					PodTemplate: &corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{{
+								Name:  commonconsts.MainContainerName,
+								Image: "worker:latest",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										corev1.ResourceName("gpu.intel.com/i915"): resource.MustParse("2"),
+									},
+								},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+	deviceClass := &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: "gpu.intel.com"}}
+	cl := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(dgd, deviceClass).
+		Build()
+	r := &DynamoGraphDeploymentReconciler{
+		Client:        cl,
+		Recorder:      record.NewFakeRecorder(100),
+		RuntimeConfig: &controller_common.RuntimeConfig{DRAEnabled: true},
+	}
+
+	require.NoError(t, r.reconcileGMSResourceClaimTemplates(ctx, dgd))
+
+	template := &resourcev1.ResourceClaimTemplate{}
+	require.NoError(t, cl.Get(ctx, client.ObjectKey{
+		Name:      "test-dgd-decode-gpu",
+		Namespace: "default",
+	}, template))
+	require.Len(t, template.Spec.Spec.Devices.Requests, 1)
+	request := template.Spec.Spec.Devices.Requests[0]
+	require.NotNil(t, request.Exactly)
+	// The standalone device class is used verbatim, never defaulted to NVIDIA.
+	assert.Equal(t, "gpu.intel.com", request.Exactly.DeviceClassName)
+	assert.Equal(t, int64(2), request.Exactly.Count)
 }
 
 func TestDynamoGraphDeploymentReconciler_reconcileGMSResourceClaimTemplates_CleansStaleNonGMSResourceClaimTemplate(t *testing.T) {

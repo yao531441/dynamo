@@ -28,7 +28,10 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/checkpoint"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	controllercommon "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dra"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo/epp"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -142,6 +145,11 @@ func (v *SharedSpecValidator) Validate(ctx context.Context) (admission.Warnings,
 
 	// Validate GPU memory service configuration (intra-pod GMS)
 	if err := v.validateGPUMemoryService(); err != nil {
+		return nil, err
+	}
+
+	// Validate standalone DRA device class (non-GMS direct GPU allocation)
+	if err := v.validateStandaloneDeviceClass(); err != nil {
 		return nil, err
 	}
 
@@ -481,6 +489,109 @@ func (v *SharedSpecValidator) validateGPUMemoryService() error {
 	}
 
 	return nil
+}
+
+// validateStandaloneDeviceClass validates the deviceClassName field, which
+// requests GPUs directly through DRA without GPU Memory Service (e.g. for
+// non-NVIDIA accelerators). When set it requires a worker-class component with
+// at least one GPU, and it must not be combined with gpuMemoryService: GMS owns
+// the DRA ResourceClaimTemplate device class for the components that enable it,
+// so the two are mutually exclusive.
+func (v *SharedSpecValidator) validateStandaloneDeviceClass() error {
+	if v.spec.DeviceClassName == "" {
+		return nil
+	}
+
+	if v.spec.GPUMemoryService != nil && v.spec.GPUMemoryService.Enabled {
+		return fmt.Errorf(
+			"%s.deviceClassName cannot be combined with gpuMemoryService: GPU memory service manages its own DRA device class",
+			v.fieldPath)
+	}
+
+	isWorker := v.spec.ComponentType == consts.ComponentTypeWorker ||
+		v.spec.ComponentType == consts.ComponentTypePrefill ||
+		v.spec.ComponentType == consts.ComponentTypeDecode
+	if !isWorker {
+		return fmt.Errorf(
+			"%s.deviceClassName: a standalone DRA device class is only supported for worker components (componentType must be worker, prefill, or decode)",
+			v.fieldPath)
+	}
+
+	gpuCount, err := standaloneGPUCount(v.spec)
+	if err != nil || gpuCount < 1 {
+		return fmt.Errorf(
+			"%s.deviceClassName: a standalone DRA device class requires at least one GPU resource "+
+				"(resources.limits.gpu or a vendor GPU resource name such as gpu.intel.com/i915)",
+			v.fieldPath)
+	}
+
+	return nil
+}
+
+// standaloneGPUCount counts the GPUs the controller would place on the main
+// container of a standalone DRA component. The controller builds the
+// ResourceClaimTemplate from the merged main-container resources
+// (dynamo.GetMainContainerResources), which combines the typed spec.resources
+// with extraPodSpec.mainContainer.resources, so the webhook must consider both
+// sources to avoid rejecting a config the controller accepts. Both the typed gpu
+// field and vendor GPU resource names (e.g. "gpu.intel.com/i915", which a
+// v1beta1 spec converts into Resources.*.Custom) are recognized via
+// dra.ExtractGPUCountFromResourceRequirements so validation and template
+// generation agree.
+func standaloneGPUCount(spec *nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec) (int, error) {
+	limits := corev1.ResourceList{}
+	requests := corev1.ResourceList{}
+	if spec.Resources != nil {
+		addResourceEntries(limits, gpuResourceList(spec.Resources.Limits))
+		addResourceEntries(requests, gpuResourceList(spec.Resources.Requests))
+	}
+	// extraPodSpec.mainContainer.resources override the typed fields on key
+	// conflicts (mergo override in conversion), so apply them last.
+	if eps := spec.ExtraPodSpec; eps != nil && eps.MainContainer != nil {
+		addResourceEntries(limits, eps.MainContainer.Resources.Limits)
+		addResourceEntries(requests, eps.MainContainer.Resources.Requests)
+	}
+	return dra.ExtractGPUCountFromResourceRequirements(corev1.ResourceRequirements{
+		Limits:   limits,
+		Requests: requests,
+	})
+}
+
+// addResourceEntries copies src into dst (overwriting on key conflict); a nil
+// src is a no-op.
+func addResourceEntries(dst, src corev1.ResourceList) {
+	for name, quantity := range src {
+		dst[name] = quantity
+	}
+}
+
+// gpuResourceList projects the GPU-relevant entries of a ResourceItem into a
+// corev1.ResourceList using the same key rules as the v1alpha1 -> native
+// conversion: the typed gpu uses gpuType (or nvidia.com/gpu by default) and
+// custom entries keep their keys.
+func gpuResourceList(item *nvidiacomv1alpha1.ResourceItem) corev1.ResourceList {
+	if item == nil {
+		return nil
+	}
+	out := corev1.ResourceList{}
+	if item.GPU != "" {
+		key := item.GPUType
+		if key == "" {
+			key = consts.KubeResourceGPUNvidia
+		}
+		if q, err := resource.ParseQuantity(item.GPU); err == nil {
+			out[corev1.ResourceName(key)] = q
+		}
+	}
+	for k, v := range item.Custom {
+		if q, err := resource.ParseQuantity(v); err == nil {
+			out[corev1.ResourceName(k)] = q
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (v *SharedSpecValidator) validateSnapshotWithGPUMemoryService() error {

@@ -1606,6 +1606,22 @@ func GenerateBasePodSpec(
 			}
 			gms.EnsureClient(&podSpec, container)
 		}
+	} else if deviceClass := StandaloneDeviceClass(component); deviceClass != "" {
+		// Standalone DRA: the component requests GPUs directly through a DRA
+		// ResourceClaimTemplate (created by the DGD controller) without GPU
+		// Memory Service. StandaloneDeviceClass is non-empty only when no GMS is
+		// configured, so this branch never runs for GMS components (including
+		// inter-pod GMS) and leaves the NVIDIA path above byte-for-byte unchanged.
+		//
+		// Apply the same shared claim used by intra-pod GMS, but do not inject a
+		// GMS server sidecar (the engine talks to the device directly) and do not
+		// add the nvidia.com/gpu toleration: a non-NVIDIA accelerator must not
+		// assume the NVIDIA node taint. The claim's device class is carried by the
+		// ResourceClaimTemplate (looked up by name).
+		claimTemplateName := dra.ResourceClaimTemplateName(parentGraphDeploymentName, serviceName)
+		if err := dra.ApplyClaimWithoutGPUToleration(&podSpec, claimTemplateName); err != nil {
+			return nil, fmt.Errorf("failed to apply DRA claim for standalone device class %q: %w", deviceClass, err)
+		}
 	}
 
 	// Clone main container into two engine containers (active + standby) for failover.

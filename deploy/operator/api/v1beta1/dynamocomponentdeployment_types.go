@@ -180,6 +180,18 @@ type DynamoComponentDeploymentSharedSpec struct {
 	// +optional
 	TopologyConstraint *TopologyConstraint `json:"topologyConstraint,omitempty"`
 
+	// deviceClassName is the DRA DeviceClass to request GPUs from when using
+	// standalone DRA (Dynamic Resource Allocation without the GPU Memory
+	// Service), e.g. "gpu.intel.com" or "gpu.amd.com". Leave empty to opt out:
+	// an empty value requests GPUs the normal (device-plugin) way. This is
+	// distinct from `experimental.gpuMemoryService.deviceClassName`, which
+	// applies only when GMS is enabled; setting both is rejected by the
+	// validation webhook. This field intentionally has no default so that an
+	// empty value reliably means "standalone DRA off" (defaulting it would
+	// silently route every component onto DRA).
+	// +optional
+	DeviceClassName string `json:"deviceClassName,omitempty"`
+
 	// experimental groups opt-in preview features whose API shape and
 	// behavior may change in breaking ways between v1beta1 releases,
 	// including disappearing without a name-preserving graduation path.

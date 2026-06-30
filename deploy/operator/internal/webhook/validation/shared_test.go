@@ -40,6 +40,15 @@ func TestSharedSpecValidator_Validate(t *testing.T) {
 		workerGPU        = &nvidiacomv1alpha1.Resources{
 			Limits: &nvidiacomv1alpha1.ResourceItem{GPU: "1"},
 		}
+		// workerGPUVendor models a non-NVIDIA GPU requested by its vendor
+		// resource name. A v1beta1 spec with limits {"gpu.intel.com/i915": "1"}
+		// converts to this shape (the vendor key lands in Custom), which the
+		// controller counts via dra.ExtractGPUCountFromResourceRequirements.
+		workerGPUVendor = &nvidiacomv1alpha1.Resources{
+			Limits: &nvidiacomv1alpha1.ResourceItem{
+				Custom: map[string]string{"gpu.intel.com/i915": "1"},
+			},
+		}
 	)
 
 	tests := []struct {
@@ -458,6 +467,103 @@ func TestSharedSpecValidator_Validate(t *testing.T) {
 			fieldPath:           "spec.services[worker]",
 			calculatedNamespace: "default-my-dgd",
 			wantErr:             false,
+		},
+		{
+			name: "standalone deviceClassName on worker with a GPU is valid",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeWorker,
+				Resources:       workerGPU,
+				DeviceClassName: "gpu.intel.com",
+			},
+			fieldPath:           "spec.services[worker]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             false,
+		},
+		{
+			name: "standalone deviceClassName on worker with a vendor GPU resource is valid",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeWorker,
+				Resources:       workerGPUVendor,
+				DeviceClassName: "gpu.intel.com",
+			},
+			fieldPath:           "spec.services[worker]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             false,
+		},
+		{
+			// The controller reads the merged main-container resources, so a GPU
+			// declared only via extraPodSpec.mainContainer.resources must also be
+			// accepted by the webhook (it is for the controller path).
+			name: "standalone deviceClassName with a GPU via extraPodSpec.mainContainer is valid",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeWorker,
+				DeviceClassName: "gpu.intel.com",
+				ExtraPodSpec: &nvidiacomv1alpha1.ExtraPodSpec{
+					MainContainer: &corev1.Container{
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceName("gpu.intel.com/i915"): resource.MustParse("1"),
+							},
+						},
+					},
+				},
+			},
+			fieldPath:           "spec.services[worker]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             false,
+		},
+		{
+			name: "standalone deviceClassName with a disabled gpuMemoryService is valid",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeWorker,
+				Resources:       workerGPU,
+				DeviceClassName: "gpu.intel.com",
+				GPUMemoryService: &nvidiacomv1alpha1.GPUMemoryServiceSpec{
+					Enabled: false,
+				},
+			},
+			fieldPath:           "spec.services[worker]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             false,
+		},
+		{
+			name: "standalone deviceClassName on a non-worker component is rejected",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeFrontend,
+				Resources:       workerGPU,
+				DeviceClassName: "gpu.intel.com",
+			},
+			fieldPath:           "spec.services[frontend]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             true,
+			errContains:         "deviceClassName: a standalone DRA device class is only supported for worker components",
+		},
+		{
+			name: "standalone deviceClassName without a GPU is rejected",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeWorker,
+				DeviceClassName: "gpu.intel.com",
+			},
+			fieldPath:           "spec.services[worker]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             true,
+			errContains:         "deviceClassName: a standalone DRA device class requires at least one GPU resource",
+		},
+		{
+			name: "standalone deviceClassName combined with enabled gpuMemoryService is rejected",
+			spec: &nvidiacomv1alpha1.DynamoComponentDeploymentSharedSpec{
+				ComponentType:   consts.ComponentTypeWorker,
+				Resources:       workerGPU,
+				DeviceClassName: "gpu.intel.com",
+				GPUMemoryService: &nvidiacomv1alpha1.GPUMemoryServiceSpec{
+					Enabled: true,
+					Mode:    nvidiacomv1alpha1.GMSModeIntraPod,
+				},
+			},
+			fieldPath:           "spec.services[worker]",
+			calculatedNamespace: "default-my-dgd",
+			wantErr:             true,
+			errContains:         "deviceClassName cannot be combined with gpuMemoryService",
 		},
 	}
 

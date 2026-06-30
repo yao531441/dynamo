@@ -960,7 +960,9 @@ func (r *DynamoGraphDeploymentReconciler) reconcileGroveScaling(
 // DRA-backed GPU allocation.
 //
 // Both the GMS sidecar and inter-pod GMS
-// failover (failover.mode=interPod) allocate GPUs via DRA ResourceClaims.
+// failover (failover.mode=interPod) allocate GPUs via DRA ResourceClaims, as do
+// standalone components that request a non-GMS device class directly (see
+// dynamo.StandaloneDeviceClass).
 // Without DRA, pods would be admitted by the webhook but silently reference
 // ResourceClaimTemplates that reconcile never creates, producing a confusing
 // "resourceclaim not found" at schedule time. We fail fast here so the user
@@ -974,6 +976,12 @@ func (r *DynamoGraphDeploymentReconciler) reconcileGMSResourceClaimTemplates(ctx
 			if dynamo.GetGPUMemoryService(component) != nil || component.IsInterPodFailoverEnabled() {
 				return fmt.Errorf(
 					"gpuMemoryService / inter-pod GMS failover requires DRA (Dynamic Resource Allocation), " +
+						"but DRA is not available (either the resource.k8s.io/v1 API is not registered on this cluster, " +
+						"which requires Kubernetes 1.34+, or DRA has been explicitly disabled in the operator configuration)")
+			}
+			if dynamo.StandaloneDeviceClass(component) != "" {
+				return fmt.Errorf(
+					"standalone DRA device class requires DRA (Dynamic Resource Allocation), " +
 						"but DRA is not available (either the resource.k8s.io/v1 API is not registered on this cluster, " +
 						"which requires Kubernetes 1.34+, or DRA has been explicitly disabled in the operator configuration)")
 			}
@@ -997,6 +1005,18 @@ func (r *DynamoGraphDeploymentReconciler) reconcileGMSResourceClaimTemplates(ctx
 			if deviceClassName == "" {
 				deviceClassName = dra.DefaultDeviceClassName
 			}
+		} else if dc := dynamo.StandaloneDeviceClass(component); dc != "" {
+			// Standalone DRA: component requests GPUs directly through the named
+			// device class without GMS. Reuse the same ResourceClaimTemplate
+			// pipeline as GMS; only the device class differs (and is never
+			// defaulted to NVIDIA, since StandaloneDeviceClass is always
+			// explicit). The GMS branch above is untouched.
+			var err error
+			gpuCount, err = dra.ExtractGPUCountFromResourceRequirements(dynamo.GetMainContainerResources(component))
+			if err != nil {
+				return fmt.Errorf("invalid GPU resource requirements for standalone DRA ResourceClaimTemplate for %s: %w", componentName, err)
+			}
+			deviceClassName = dc
 		}
 		claimTemplateName := dra.ResourceClaimTemplateName(dynamoDeployment.Name, componentName)
 		_, _, err := commoncontroller.SyncResource(ctx, r, dynamoDeployment, func(ctx context.Context) (*resourcev1.ResourceClaimTemplate, bool, error) {

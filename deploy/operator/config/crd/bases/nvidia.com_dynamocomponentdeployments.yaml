@@ -819,6 +819,21 @@ spec:
                 componentType:
                   description: ComponentType indicates the role of this component (for example, "main").
                   type: string
+                deviceClassName:
+                  description: |-
+                    DeviceClassName is the DRA DeviceClass to request GPUs from when using
+                    standalone DRA (Dynamic Resource Allocation without the GPU Memory
+                    Service). It is the vendor GPU selector, e.g. "gpu.intel.com" or
+                    "gpu.amd.com". Leave empty to opt out: an empty value requests GPU
+                    resources the normal (device-plugin) way. This is distinct from
+                    gpuMemoryService.deviceClassName, which selects the DeviceClass only when
+                    GMS is enabled; setting both this field and gpuMemoryService is rejected
+                    by the validation webhook.
+
+                    Unlike gpuMemoryService.deviceClassName, this field intentionally has no
+                    default. An empty value is the explicit "standalone DRA off" signal, so
+                    defaulting it would silently route every component onto DRA.
+                  type: string
                 dynamoNamespace:
                   description: |-
                     DynamoNamespace is deprecated and will be removed in a future version.
@@ -11666,6 +11681,18 @@ spec:
                   required:
                     - pvcName
                   type: object
+                deviceClassName:
+                  description: |-
+                    deviceClassName is the DRA DeviceClass to request GPUs from when using
+                    standalone DRA (Dynamic Resource Allocation without the GPU Memory
+                    Service), e.g. "gpu.intel.com" or "gpu.amd.com". Leave empty to opt out:
+                    an empty value requests GPUs the normal (device-plugin) way. This is
+                    distinct from `experimental.gpuMemoryService.deviceClassName`, which
+                    applies only when GMS is enabled; setting both is rejected by the
+                    validation webhook. This field intentionally has no default so that an
+                    empty value reliably means "standalone DRA off" (defaulting it would
+                    silently route every component onto DRA).
+                  type: string
                 eppConfig:
                   description: |-
                     eppConfig holds EPP-specific configuration for Endpoint Picker Plugin

@@ -169,6 +169,27 @@ func GetGPUMemoryService(component *v1beta1.DynamoComponentDeploymentSharedSpec)
 	return component.Experimental.GPUMemoryService
 }
 
+// StandaloneDeviceClass returns the DRA device class for a component that
+// requests GPUs directly via Dynamic Resource Allocation, without GPU Memory
+// Service. It returns "" when standalone DRA is not in effect.
+//
+// GPU Memory Service owns the ResourceClaimTemplate device class for components
+// that enable it, so when a GPU memory service is configured this returns "" and
+// the existing GMS path is left byte-for-byte unchanged. A non-empty result is
+// therefore only possible for components that have not opted into GMS and have
+// set DeviceClassName explicitly (e.g. non-NVIDIA accelerators such as
+// "gpu.intel.com"). NVIDIA components, which use GMS, never reach the standalone
+// branch.
+func StandaloneDeviceClass(component *v1beta1.DynamoComponentDeploymentSharedSpec) string {
+	if component == nil {
+		return ""
+	}
+	if GetGPUMemoryService(component) != nil {
+		return ""
+	}
+	return component.DeviceClassName
+}
+
 // GetCheckpoint returns the component checkpoint config from the v1beta1
 // experimental block.
 func GetCheckpoint(component *v1beta1.DynamoComponentDeploymentSharedSpec) *v1beta1.ComponentCheckpointConfig {

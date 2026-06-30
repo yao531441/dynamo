@@ -939,7 +939,7 @@ func TestDGD_RoundTrip_Status(t *testing.T) {
 // TestDGD_RoundTrip_FullSharedSpec covers every first-class v1beta1 shared-spec
 // field that has not been exercised elsewhere (DynamoNamespace is v1alpha1-only
 // so it lives in a separate test): GlobalDynamoNamespace, Multinode, ModelRef,
-// per-service TopologyConstraint, EPPConfig.
+// per-service TopologyConstraint, EPPConfig, DeviceClassName.
 func TestDGD_RoundTrip_FullSharedSpec(t *testing.T) {
 	src := &v1beta1.DynamoGraphDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "full", Namespace: "ns"},
@@ -958,6 +958,7 @@ func TestDGD_RoundTrip_FullSharedSpec(t *testing.T) {
 					ComponentName:         "worker",
 					ComponentType:         v1beta1.ComponentTypeWorker,
 					GlobalDynamoNamespace: true,
+					DeviceClassName:       "gpu.intel.com",
 					Multinode:             &v1beta1.MultinodeSpec{NodeCount: 4},
 					ModelRef: &v1beta1.ModelReference{
 						Name:     "llama-3-70b-instruct",

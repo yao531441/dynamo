@@ -237,3 +237,46 @@ func dcdFromAlpha(t *testing.T, spec v1alpha1.DynamoComponentDeploymentSpec) *v1
 	}
 	return beta
 }
+
+func TestStandaloneDeviceClass(t *testing.T) {
+	tests := []struct {
+		name      string
+		component *v1beta1.DynamoComponentDeploymentSharedSpec
+		want      string
+	}{
+		{
+			name:      "nil component returns empty",
+			component: nil,
+			want:      "",
+		},
+		{
+			name:      "no device class and no GMS returns empty",
+			component: &v1beta1.DynamoComponentDeploymentSharedSpec{},
+			want:      "",
+		},
+		{
+			name: "device class without GMS is returned",
+			component: &v1beta1.DynamoComponentDeploymentSharedSpec{
+				DeviceClassName: "gpu.intel.com",
+			},
+			want: "gpu.intel.com",
+		},
+		{
+			name: "device class is suppressed when GMS is configured",
+			component: &v1beta1.DynamoComponentDeploymentSharedSpec{
+				DeviceClassName: "gpu.intel.com",
+				Experimental: &v1beta1.ExperimentalSpec{
+					GPUMemoryService: &v1beta1.GPUMemoryServiceSpec{},
+				},
+			},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StandaloneDeviceClass(tt.component); got != tt.want {
+				t.Errorf("StandaloneDeviceClass() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

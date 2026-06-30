@@ -33,9 +33,26 @@ const (
 )
 
 // ApplyClaim replaces the first container's scalar GPU resources with a shared
-// DRA ResourceClaim. Every container that references this claim name will share
-// the same physical GPUs.
+// DRA ResourceClaim and adds an nvidia.com/gpu:NoSchedule toleration so the pod
+// can land on NVIDIA GPU nodes. Every container that references this claim name
+// will share the same physical GPUs.
 func ApplyClaim(podSpec *corev1.PodSpec, claimTemplateName string) error {
+	return applyClaim(podSpec, claimTemplateName, commonconsts.KubeResourceGPUNvidia)
+}
+
+// ApplyClaimWithoutGPUToleration is ApplyClaim without the nvidia.com/gpu
+// toleration. Standalone DRA on non-NVIDIA accelerators must not assume the
+// NVIDIA node taint key, so the operator injects no toleration and users add
+// any vendor-specific one (e.g. via extraPodSpec) themselves.
+func ApplyClaimWithoutGPUToleration(podSpec *corev1.PodSpec, claimTemplateName string) error {
+	return applyClaim(podSpec, claimTemplateName, "")
+}
+
+// applyClaim wires the shared DRA claim onto the first container. When
+// gpuTolerationKey is non-empty it also adds a <key>:NoSchedule toleration
+// (DRA bypasses the device-plugin toleration injection, so tainted GPU nodes
+// need it explicitly).
+func applyClaim(podSpec *corev1.PodSpec, claimTemplateName, gpuTolerationKey string) error {
 	if len(podSpec.Containers) == 0 {
 		return fmt.Errorf("pod spec must have at least one container for DRA claim")
 	}
@@ -56,22 +73,8 @@ func ApplyClaim(podSpec *corev1.PodSpec, claimTemplateName string) error {
 		container.Resources.Claims = append(container.Resources.Claims, corev1.ResourceClaim{Name: ClaimName})
 	}
 
-	// GPU nodes are typically tainted with nvidia.com/gpu=NoSchedule. DRA
-	// bypasses the device-plugin toleration injection, so add it explicitly.
-	hasToleration := false
-	for i := range podSpec.Tolerations {
-		toleration := podSpec.Tolerations[i]
-		if toleration.Key == commonconsts.KubeResourceGPUNvidia && toleration.Effect == corev1.TaintEffectNoSchedule {
-			hasToleration = true
-			break
-		}
-	}
-	if !hasToleration {
-		podSpec.Tolerations = append(podSpec.Tolerations, corev1.Toleration{
-			Key:      commonconsts.KubeResourceGPUNvidia,
-			Operator: corev1.TolerationOpExists,
-			Effect:   corev1.TaintEffectNoSchedule,
-		})
+	if gpuTolerationKey != "" {
+		addGPUNodeToleration(podSpec, gpuTolerationKey)
 	}
 
 	claim := corev1.PodResourceClaim{
@@ -86,6 +89,22 @@ func ApplyClaim(podSpec *corev1.PodSpec, claimTemplateName string) error {
 	}
 	podSpec.ResourceClaims = append(podSpec.ResourceClaims, claim)
 	return nil
+}
+
+// addGPUNodeToleration appends a <key>:NoSchedule toleration if one is not
+// already present.
+func addGPUNodeToleration(podSpec *corev1.PodSpec, key string) {
+	for i := range podSpec.Tolerations {
+		toleration := podSpec.Tolerations[i]
+		if toleration.Key == key && toleration.Effect == corev1.TaintEffectNoSchedule {
+			return
+		}
+	}
+	podSpec.Tolerations = append(podSpec.Tolerations, corev1.Toleration{
+		Key:      key,
+		Operator: corev1.TolerationOpExists,
+		Effect:   corev1.TaintEffectNoSchedule,
+	})
 }
 
 // ResourceClaimTemplateName returns the deterministic name for the

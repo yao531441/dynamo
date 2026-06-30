@@ -125,6 +125,22 @@ func TestApplyClaim_AlwaysTargetsFirstContainer(t *testing.T) {
 	assert.Empty(t, ps.Containers[1].Resources.Claims)
 }
 
+func TestApplyClaimWithoutGPUToleration_OmitsNvidiaToleration(t *testing.T) {
+	ps := basePodSpec()
+	require.NoError(t, ApplyClaimWithoutGPUToleration(&ps, "myapp-worker-gpu"))
+
+	// The claim is wired exactly like ApplyClaim...
+	require.Len(t, ps.Containers[0].Resources.Claims, 1)
+	assert.Equal(t, ClaimName, ps.Containers[0].Resources.Claims[0].Name)
+	require.Len(t, ps.ResourceClaims, 1)
+	assert.Equal(t, "myapp-worker-gpu", *ps.ResourceClaims[0].ResourceClaimTemplateName)
+
+	// ...but no nvidia.com/gpu toleration is injected for a non-NVIDIA device.
+	for _, tol := range ps.Tolerations {
+		assert.NotEqual(t, commonconsts.KubeResourceGPUNvidia, tol.Key)
+	}
+}
+
 func TestExtractGPUCountFromResourceRequirements_DeterministicResourceSelection(t *testing.T) {
 	resources := corev1.ResourceRequirements{
 		Limits: corev1.ResourceList{

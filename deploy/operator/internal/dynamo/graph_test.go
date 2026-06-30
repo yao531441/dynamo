@@ -6330,6 +6330,69 @@ func TestGenerateBasePodSpec_GPUMemoryServiceMissingExtraClientContainerIgnored(
 	assert.Nil(t, missing)
 }
 
+func TestGenerateBasePodSpec_StandaloneDeviceClassAppliesDRAClaimWithoutGMS(t *testing.T) {
+	podSpec, err := GenerateBasePodSpec(
+		betaComponent(t, &v1alpha1.DynamoComponentDeploymentSharedSpec{
+			ComponentType:   commonconsts.ComponentTypeWorker,
+			DeviceClassName: "gpu.intel.com",
+			ExtraPodSpec: &v1alpha1.ExtraPodSpec{
+				MainContainer: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceName("gpu.intel.com/i915"): resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		}),
+		BackendFrameworkVLLM,
+		&mockSecretsRetriever{},
+		"test-deployment",
+		"default",
+		RoleMain,
+		1,
+		&configv1alpha1.OperatorConfiguration{},
+		commonconsts.MultinodeDeploymentTypeGrove,
+		"worker",
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+
+	// Standalone DRA must not inject a GMS server sidecar — the engine talks to
+	// the device directly.
+	require.Nil(t, findInitContainerByName(podSpec, gmsruntime.ServerContainerName))
+
+	// The shared DRA claim is applied, referencing the component's
+	// ResourceClaimTemplate by name (same mechanism as intra-pod GMS).
+	require.Len(t, podSpec.ResourceClaims, 1)
+	require.Equal(t, dra.ClaimName, podSpec.ResourceClaims[0].Name)
+	require.NotNil(t, podSpec.ResourceClaims[0].ResourceClaimTemplateName)
+	require.Equal(t,
+		dra.ResourceClaimTemplateName("test-deployment", "worker"),
+		*podSpec.ResourceClaims[0].ResourceClaimTemplateName)
+
+	// The main container references the claim and no longer requests scalar GPUs.
+	var main *corev1.Container
+	for i := range podSpec.Containers {
+		if podSpec.Containers[i].Name == commonconsts.MainContainerName {
+			main = &podSpec.Containers[i]
+		}
+	}
+	require.NotNil(t, main)
+	require.Len(t, main.Resources.Claims, 1)
+	assert.Equal(t, dra.ClaimName, main.Resources.Claims[0].Name)
+	_, hasIntelGPU := main.Resources.Limits[corev1.ResourceName("gpu.intel.com/i915")]
+	assert.False(t, hasIntelGPU, "standalone DRA must strip scalar GPU resources")
+
+	// Standalone DRA must not inject the NVIDIA node toleration — a non-NVIDIA
+	// accelerator must not assume the nvidia.com/gpu taint.
+	for _, tol := range podSpec.Tolerations {
+		assert.NotEqual(t, commonconsts.KubeResourceGPUNvidia, tol.Key,
+			"standalone DRA must not add the nvidia.com/gpu toleration")
+	}
+}
+
 func assertGMSClientContainer(t *testing.T, container *corev1.Container) {
 	t.Helper()
 
