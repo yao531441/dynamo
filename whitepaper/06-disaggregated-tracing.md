@@ -1,6 +1,6 @@
 # 1.6 Disaggregated + Tracing (`disagg_tracing_xpu_dra.yaml`)
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Overview**: Same disaggregated topology as §1.5, plus the same OpenTelemetry tracing pattern
 as §1.2 — `DYN_LOGGING_JSONL`/`OTEL_EXPORT_ENABLED` at the deployment level, and per-service

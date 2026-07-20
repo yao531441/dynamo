@@ -1,6 +1,6 @@
 # 1.8 Disaggregated + KV Router (`disagg_router_xpu_dra.yaml`)
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Overview**: The combination that upstream explicitly recommends for genuine KV-aware routing
 on Intel XPU — disaggregated P/D (so real `BlockStored` KV events are emitted during prefill)

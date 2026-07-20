@@ -52,11 +52,12 @@ end confirmed so far (TensorRT-LLM).
 
 ## Table of Contents
 
-> Status icons: ✅ verified working / 🚧 documented from official sources but not yet run hands-on /
-> ➖ not applicable (no Intel XPU support exists upstream)
+> Status labels used below: **Verified** (ran hands-on and confirmed working) / **In Progress**
+> (documented from official sources, not yet run hands-on) / **N/A** (not applicable — no Intel
+> XPU support exists upstream)
 
 - [00-common-installation.md](00-common-installation.md) — Chapter 0. Common Installation (applies to every case below)
-- **Chapter 1. Intel XPU vLLM Backend Templates** (the 8 DRA templates) — all fully written 🚧
+- **Chapter 1. Intel XPU vLLM Backend Templates** (the 8 DRA templates) — all fully written (In Progress)
   - [01-aggregated.md](01-aggregated.md) — 1.1 Aggregated (`agg_xpu_dra.yaml`)
   - [02-aggregated-tracing.md](02-aggregated-tracing.md) — 1.2 Aggregated + Tracing (`agg_tracing_xpu_dra.yaml`)
   - [03-aggregated-kv-router.md](03-aggregated-kv-router.md) — 1.3 Aggregated + KV Router (`agg_router_xpu_dra.yaml`)
@@ -65,9 +66,9 @@ end confirmed so far (TensorRT-LLM).
   - [06-disaggregated-tracing.md](06-disaggregated-tracing.md) — 1.6 Disaggregated + Tracing (`disagg_tracing_xpu_dra.yaml`)
   - [07-disaggregated-planner.md](07-disaggregated-planner.md) — 1.7 Disaggregated + Planner (`disagg_planner_xpu_dra.yaml`)
   - [08-disaggregated-kv-router.md](08-disaggregated-kv-router.md) — 1.8 Disaggregated + KV Router (`disagg_router_xpu_dra.yaml`)
-- [09-global-planner.md](09-global-planner.md) — Chapter 2. Global Planner on Intel XPU (`global-planner-vllm-test-xpu-dra.yaml`) 🚧
-- [10-recipe-qwen3-vl-hetero-xpu-gpu.md](10-recipe-qwen3-vl-hetero-xpu-gpu.md) — Chapter 3. Recipe: Qwen3-VL-32B-FP8 Heterogeneous Hardware Disaggregation (Intel XPU encode + NVIDIA GPU decode) 🚧
-- [11-not-available-on-xpu.md](11-not-available-on-xpu.md) — Chapter 4. Feasible-but-Untemplated vs. Genuinely NVIDIA-Locked ⚠️/➖
+- [09-global-planner.md](09-global-planner.md) — Chapter 2. Global Planner on Intel XPU (`global-planner-vllm-test-xpu-dra.yaml`) (In Progress)
+- [10-recipe-qwen3-vl-hetero-xpu-gpu.md](10-recipe-qwen3-vl-hetero-xpu-gpu.md) — Chapter 3. Recipe: Qwen3-VL-32B-FP8 Heterogeneous Hardware Disaggregation (Intel XPU encode + NVIDIA GPU decode) (In Progress)
+- [11-not-available-on-xpu.md](11-not-available-on-xpu.md) — Chapter 4. Feasible-but-Untemplated vs. Genuinely NVIDIA-Locked (Feasible / N/A)
 - [appendix-a-env-vars.md](appendix-a-env-vars.md) — Appendix A. Environment Variables Reference
 - [appendix-b-known-issues.md](appendix-b-known-issues.md) — Appendix B. Known Issues / Workarounds
 - [tracking.md](tracking.md) — Appendix C. Case Verification Status (live tracker)

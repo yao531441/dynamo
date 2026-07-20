@@ -1,6 +1,6 @@
 # 1.1 Aggregated (`agg_xpu_dra.yaml`)
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Overview**: The simplest pattern — a single `VllmDecodeWorker` role handles both prefill and
 decode for every request (no P/D separation). Good starting point to validate that DRA GPU

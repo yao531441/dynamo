@@ -1,6 +1,6 @@
 # 1.4 Aggregated + KV Router, No-KV-Events Mode (`agg_router_kv_approx_xpu_dra.yaml`)
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Overview**: A variant of §1.3 using `--no-kv-events` on the Frontend
 (`dynamo.frontend --router-mode kv --no-kv-events`) and `enable_kv_cache_events: false` on the

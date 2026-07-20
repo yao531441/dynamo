@@ -1,6 +1,6 @@
 # 1.5 Disaggregated (`disagg_xpu_dra.yaml`) — Deep-Dive Sample Case
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Overview**: True Prefill/Decode disaggregation on Intel XPU. Two distinct worker roles
 (`VllmPrefillWorker`, `VllmDecodeWorker`), each with `subComponentType: prefill`/`decode`, and

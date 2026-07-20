@@ -1,6 +1,6 @@
 # Chapter 2 — Global Planner on Intel XPU
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Source**: `examples/global_planner/global-planner-vllm-test-xpu-dra.yaml`, documented in
 `examples/global_planner/README.md`.

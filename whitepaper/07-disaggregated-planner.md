@@ -1,6 +1,6 @@
 # 1.7 Disaggregated + Planner (`disagg_planner_xpu_dra.yaml`)
 
-**Status**: 🚧 documented from repo, not yet run hands-on.
+**Status**: documented from repo, not yet run hands-on.
 
 **Overview**: Adds a `Planner` component that consumes pre-profiled throughput/latency curves
 (shipped as a `ConfigMap` named `planner-profile-data`, containing `prefill_raw_data.json` and
