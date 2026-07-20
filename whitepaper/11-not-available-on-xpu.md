@@ -10,7 +10,7 @@ these are gaps, not fundamental limitations:
 | Template | Path | Why it looks feasible on Intel XPU |
 |---|---|---|
 | LoRA adapter serving | `backends/vllm/deploy/lora/agg_lora.yaml`, `lora/multimodal/agg_qwen_lora.yaml` | Plain vLLM, no CUDA-specific field. Already confirmed working on Intel XPU via the bash launch-script path (`backends/vllm/launch/lora/xpu/agg_lora_xpu.sh`) — the K8s YAML gap is just a templating gap |
-| GAIE (Gateway API Inference Extension) integration | `backends/vllm/deploy/gaie/{agg,disagg}.yaml` + `http-route.yaml` | Same routing-layer pattern already proven hardware-agnostic on the llm-d side of this whitepaper |
+| GAIE (Gateway API Inference Extension) integration | `backends/vllm/deploy/gaie/{agg,disagg}.yaml` + `http-route.yaml` | Same routing-layer pattern (EPP/InferencePool) already proven hardware-agnostic elsewhere |
 | Multi-node disaggregation | `backends/vllm/deploy/disagg-multinode.yaml` | Same NIXL prefill/decode split as the XPU-proven `xpu/disagg_xpu_dra.yaml`, just spread across nodes |
 | GPU Memory Service (GMS) sidecar / failover | `backends/vllm/deploy/agg_gms.yaml`, `agg_failover.yaml`, `gms-failover.yaml` | Kubernetes DRA itself is vendor-neutral (Intel already has its own DRA driver, used by all 8 Chapter 1 templates). The real dependency is GMS's own device backend — its design doc (`lib/gpu_memory_service/GMS_MULTI_DEVICE.md`) shows CUDA support done and an Intel XPU backend planned as "Phase 2," just not implemented yet. Not a hard vendor lock-in, just unfinished |
 | KVBM (multi-tier KV cache: GPU→CPU→SSD→remote) | `backends/vllm/deploy/agg_kvbm.yaml`, `disagg_kvbm*.yaml` | Intel XPU support is real, active work-in-progress, not yet merged: PRs [#7946](https://github.com/ai-dynamo/dynamo/pull/7946) and [#10520](https://github.com/ai-dynamo/dynamo/pull/10520) add SYCL/Level-Zero XPU support to KVBM v2, tracked by DEP issue [#9313](https://github.com/ai-dynamo/dynamo/issues/9313), still in design discussion |
@@ -36,18 +36,6 @@ equivalent:
 Confirmed via `grep -r xpu recipes/`: no other recipe under `recipes/` references Intel XPU as of
 this writing. Each recipe would need to be checked individually against the "feasible" criteria
 above (does it use vLLM/SGLang with no NVIDIA-only sidecar features) before assuming portability.
-
-## Also worth noting: llm-d's own "feasible but not templated" case
-
-The llm-d side of this whitepaper has one directly analogous case: **`guides/rl`**
-(`verl-integration.md`, RLHF/GRPO training routing via the llm-d scheduler). Its guide contains
-**zero** hardware-specific references (no CUDA, NVIDIA, or XPU mentions at all) — it overrides
-verl's request routing to "vLLM/SGLang actors on Ray," the same routing-layer pattern as
-Flow Control and Multi-Model Routing (Chapters 2 and 3 of the companion llm-d whitepaper),
-both of which are already confirmed hardware-agnostic and Intel-XPU-compatible there.
-This makes `guides/rl` a strong feasible-but-untemplated candidate as well. It is not yet
-written as a full chapter in the llm-d whitepaper — see `llm-d/tracking.md` for the
-open scope question.
 
 ## If you want to close these gaps
 

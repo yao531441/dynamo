@@ -42,7 +42,7 @@ Status legend: ✅ verified working / 🚧 documented from official sources, not
 | Feature | Path | Status |
 |---|---|---|
 | LoRA adapter serving | `backends/vllm/deploy/lora/` | ⚠️ feasible, untemplated — plain vLLM, already proven on XPU via bash launch script |
-| GAIE integration | `backends/vllm/deploy/gaie/` | ⚠️ feasible, untemplated — same EPP/InferencePool pattern proven hardware-agnostic on llm-d side |
+| GAIE integration | `backends/vllm/deploy/gaie/` | ⚠️ feasible, untemplated — same EPP/InferencePool routing-layer pattern already proven hardware-agnostic |
 | Multi-node disaggregation | `backends/vllm/deploy/disagg-multinode.yaml` | ⚠️ feasible, untemplated — same NIXL split as XPU-proven `xpu/disagg_xpu_dra.yaml`, just multi-node |
 | GMS sidecar / failover | `backends/vllm/deploy/agg_gms.yaml`, `agg_failover.yaml`, `gms-failover.yaml` | ⚠️ feasible, in-progress — GMS's own design doc plans an Intel XPU backend ("Phase 2"), not yet built |
 | SGLang backend (all patterns) | `backends/sglang/deploy/` | ❓ unconfirmed — no XPU mention in dynamo docs; SGLang engine's own Intel XPU support not independently verified |

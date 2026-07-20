@@ -28,8 +28,7 @@ Template reference: ../template.md
 
 ## Why this document exists / scope note
 
-Unlike llm-d, where most "well-lit path" guides ship their own dedicated
-`modelserver/xpu/...` overlay, **Dynamo's Intel XPU support is concentrated in a single
+**Dynamo's Intel XPU support is concentrated in a single
 directory**: [`examples/backends/vllm/deploy/xpu/`](../../dynamo/examples/backends/vllm/deploy/xpu/).
 This directory ships **8 flat DRA (Dynamic Resource Allocation) YAML templates** covering
 combinations of serving pattern (aggregated / disaggregated) × optional add-ons (tracing,

@@ -55,7 +55,7 @@ They split into two groups by *why*.
 | `lora-model` | Plain `DynamoModel` CRD for registering a LoRA adapter — hardware-agnostic manifest, no accelerator-specific field; simply hasn't been paired with an XPU deployment example |
 | `minio-secret` | Plain Kubernetes `Secret` for MinIO credentials — hardware-agnostic, works identically regardless of accelerator |
 | `sync-lora-job` | Plain Kubernetes `Job` that downloads/uploads adapter weights — hardware-agnostic, no GPU/accelerator step in the job itself |
-| `gaie/agg` | Gateway API Inference Extension (EPP/InferencePool) integration — the same routing-layer pattern already proven hardware-agnostic on the llm-d side of this whitepaper (Flow Control, Multi-Model Routing); no XPU-specific field found, just not built for this integration point yet |
+| `gaie/agg` | Gateway API Inference Extension (EPP/InferencePool) integration — this routing-layer pattern is already proven hardware-agnostic elsewhere; no XPU-specific field found, just not built for this integration point yet |
 | `gaie/disagg` | Same reasoning as `gaie/agg` |
 | `gaie/http-route` | Plain Kubernetes Gateway API `HTTPRoute` manifest — contains no hardware reference at all; trivially reusable with any backend |
 
