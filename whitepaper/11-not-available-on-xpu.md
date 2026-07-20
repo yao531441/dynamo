@@ -13,6 +13,7 @@ these are gaps, not fundamental limitations:
 | GAIE (Gateway API Inference Extension) integration | `backends/vllm/deploy/gaie/{agg,disagg}.yaml` + `http-route.yaml` | Same routing-layer pattern already proven hardware-agnostic on the llm-d side of this whitepaper |
 | Multi-node disaggregation | `backends/vllm/deploy/disagg-multinode.yaml` | Same NIXL prefill/decode split as the XPU-proven `xpu/disagg_xpu_dra.yaml`, just spread across nodes |
 | GPU Memory Service (GMS) sidecar / failover | `backends/vllm/deploy/agg_gms.yaml`, `agg_failover.yaml`, `gms-failover.yaml` | Kubernetes DRA itself is vendor-neutral (Intel already has its own DRA driver, used by all 8 Chapter 1 templates). The real dependency is GMS's own device backend — its design doc (`lib/gpu_memory_service/GMS_MULTI_DEVICE.md`) shows CUDA support done and an Intel XPU backend planned as "Phase 2," just not implemented yet. Not a hard vendor lock-in, just unfinished |
+| KVBM (multi-tier KV cache: GPU→CPU→SSD→remote) | `backends/vllm/deploy/agg_kvbm.yaml`, `disagg_kvbm*.yaml` | Intel XPU support is real, active work-in-progress, not yet merged: PRs [#7946](https://github.com/ai-dynamo/dynamo/pull/7946) and [#10520](https://github.com/ai-dynamo/dynamo/pull/10520) add SYCL/Level-Zero XPU support to KVBM v2, tracked by DEP issue [#9313](https://github.com/ai-dynamo/dynamo/issues/9313), still in design discussion |
 | SGLang backend (all patterns) | `backends/sglang/deploy/{agg,agg_router,disagg,disagg_planner,disagg-multinode,agg_gms}.yaml` | No `xpu/` directory anywhere; SGLang engine's own Intel XPU support not independently verified — flagged as unconfirmed |
 
 None of these have been hands-on tested on Intel XPU by this whitepaper's authors — "feasible"
@@ -27,7 +28,6 @@ equivalent:
 
 | Feature | Path | Lock-in reason |
 |---|---|---|
-| KVBM (multi-tier KV cache: GPU→CPU→SSD→remote) | `backends/vllm/deploy/agg_kvbm.yaml`, `disagg_kvbm*.yaml` | Intel XPU support is real, active work-in-progress, not yet merged: PRs [#7946](https://github.com/ai-dynamo/dynamo/pull/7946) and [#10520](https://github.com/ai-dynamo/dynamo/pull/10520) add SYCL/Level-Zero XPU support to KVBM v2, tracked by DEP issue [#9313](https://github.com/ai-dynamo/dynamo/issues/9313), still in design discussion |
 | TensorRT-LLM backend (all patterns, incl. multimodal: Qwen3-VL, Llama4, LLaVA, Qwen2-VL) | `backends/trtllm/` | TensorRT-LLM is NVIDIA's proprietary compiler/runtime (TensorRT), fundamentally CUDA/NVIDIA-GPU-only — no Intel XPU port exists upstream in TensorRT-LLM itself, so this is a hard vendor lock-in, not a templating gap |
 | Triton Server backend | `backends/tritonserver/` | Not investigated in depth for this whitepaper; NVIDIA Triton Inference Server has historically been NVIDIA-GPU-centric, flagged for follow-up rather than asserted |
 
@@ -43,11 +43,11 @@ The llm-d side of this whitepaper has one directly analogous case: **`guides/rl`
 (`verl-integration.md`, RLHF/GRPO training routing via the llm-d scheduler). Its guide contains
 **zero** hardware-specific references (no CUDA, NVIDIA, or XPU mentions at all) — it overrides
 verl's request routing to "vLLM/SGLang actors on Ray," the same routing-layer pattern as
-[Flow Control](../llm-d/07-flow-control.md) and [Multi-Model Routing](../llm-d/12-multi-model-routing.md),
-both of which are already confirmed hardware-agnostic and Intel-XPU-compatible in this whitepaper.
-This makes `guides/rl` a strong feasible-but-untemplated candidate as well, resolving the
-previously open `llmd-case-rl-scope-check` scope question with a concrete finding rather than
-leaving it unconfirmed.
+Flow Control and Multi-Model Routing (Chapters 2 and 3 of the companion llm-d whitepaper),
+both of which are already confirmed hardware-agnostic and Intel-XPU-compatible there.
+This makes `guides/rl` a strong feasible-but-untemplated candidate as well. It is not yet
+written as a full chapter in the llm-d whitepaper — see `llm-d/tracking.md` for the
+open scope question.
 
 ## If you want to close these gaps
 

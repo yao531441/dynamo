@@ -35,7 +35,7 @@ Status legend: ✅ verified working / 🚧 documented from official sources, not
 
 | Case | File | Status | Owner | Notes |
 |---|---|---|---|---|
-| Hetero XPU (encode) + NVIDIA GPU (decode) disaggregation | `recipes/qwen3-vl-32b-fp8/vllm/hetero_hardware_disagg/` | 🚧 | | Discovered via a follow-up `grep -r xpu recipes/` scan; requires RDMA connectivity between an Intel XPU node and an NVIDIA GPU node — hardest prerequisite of any case in this whitepaper |
+| Hetero XPU (encode) + NVIDIA GPU (decode) disaggregation | `recipes/qwen3-vl-32b-fp8/vllm/hetero_hardware_disagg/` | 🚧 | | Requires RDMA connectivity between an Intel XPU node and an NVIDIA GPU node — hardest prerequisite of any case in this whitepaper |
 
 ## Chapter 4 — Feasible but not yet templated for Intel XPU vs. genuinely NVIDIA-locked
 

@@ -25,22 +25,18 @@ Follow `docs/kubernetes/installation-guide.md` in the `dynamo` repo. Summary of 
 apply regardless of accelerator vendor:
 
 ```bash
-export NAMESPACE=dynamo-cloud
-export RELEASE_VERSION=<dynamo-release-version>   # e.g. v0.x.y, see repo releases
+export NAMESPACE=dynamo-system
+export RELEASE_VERSION=<dynamo-release-version>   # match a version from the repo's releases
 
-# 1. Install core CRDs (cluster-scoped, install once per cluster)
-helm install dynamo-crds \
-  oci://ghcr.io/ai-dynamo/dynamo-crds \
-  --version ${RELEASE_VERSION} \
-  --namespace default
-
-# 2. Install the Dynamo Platform (operator + supporting services) into your namespace
-kubectl create namespace ${NAMESPACE} 2>/dev/null || true
-helm install dynamo-platform \
-  oci://ghcr.io/ai-dynamo/dynamo-platform \
-  --version ${RELEASE_VERSION} \
-  --namespace ${NAMESPACE}
+helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz
+helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
+  --namespace ${NAMESPACE} \
+  --create-namespace
 ```
+
+> **Note**: the `dynamo-crds` Helm chart referenced by some older instructions is deprecated as of
+> v1.0.0 — CRDs are now installed and managed by the Dynamo Operator itself as part of the
+> `dynamo-platform` chart above. No separate CRD install step is needed on current releases.
 
 > **Intel XPU note**: unlike NVIDIA deployments, you do **not** need the NVIDIA GPU Operator.
 > Skip any GPU-Operator-specific step in the installation guide; the Intel device plugin/DRA
