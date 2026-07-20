@@ -1,11 +1,10 @@
 # Dynamo vLLM Backend (Kubernetes `DynamoGraphDeployment`): Intel XPU Support Gap Analysis
 
 > Scope: **Kubernetes deployment only** (`examples/backends/vllm/deploy/`). The bash/CLI
-> `launch/` scripts are out of scope for this document per request.
+> `launch/` scripts are out of scope for this document.
 >
-> Source: original Confluence-pasted list (`to_fi_original_raw.md`, table formatting lost — see
-> that file for the raw paste) cross-checked directly against the `dynamo` repo clone at
-> `examples/backends/vllm/deploy/` and `examples/backends/vllm/deploy/xpu/`.
+> Cross-checked directly against the `dynamo` repo at `examples/backends/vllm/deploy/` and
+> `examples/backends/vllm/deploy/xpu/`.
 
 ## ✅ Already supported on Intel XPU today
 
@@ -81,9 +80,9 @@ The repo is mid-migration from the `nvidia.com/v1alpha1` CRD schema (`services:`
 
 The other 6 Intel XPU templates have **not** been ported to the newer `v1beta1` schema yet. This
 whitepaper's Chapter 1 (`whitepaper/dynamo/01-aggregated.md` through `08-disaggregated-kv-router.md`)
-documents the `v1alpha1` versions (matching what the repo actually ships for all 8 patterns) and
-did not previously call out this schema-migration gap — worth a short note there so readers on
-newer Dynamo Platform versions know `v1beta1` XPU coverage is currently partial.
+documents the `v1alpha1` versions (matching what the repo actually ships for all 8 patterns).
+Readers on newer Dynamo Platform versions should note that `v1beta1` XPU coverage is currently
+partial.
 
 Also noted in passing: `lora/` and `lora/multimodal/` each ship their own separate
 `minio-secret.yaml` / `sync-lora-job.yaml` (not shared) — both still fall under the same
