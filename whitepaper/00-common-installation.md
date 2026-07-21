@@ -11,13 +11,39 @@ cluster-level prerequisites. Do this section once per cluster.
   used by every current template).
 - Intel XPU (GPU) nodes, with the Intel GPU kernel driver installed on each node.
 - **[Intel resource drivers for Kubernetes](https://github.com/intel/intel-resource-drivers-for-kubernetes)**
-  installed, exposing a `DeviceClass` named `gpu.intel.com`. Verify with:
+  installed, exposing a `DeviceClass` named `gpu.intel.com` (see 0.1.1 below). Verify with:
   ```bash
   kubectl get deviceclass gpu.intel.com
   ```
 - Sufficient node resources for the model under test — the default model across all
   Chapter 1/2 templates is the small `Qwen/Qwen3-0.6B`, chosen deliberately by the upstream repo
   to keep XPU examples runnable on a single GPU.
+
+### 0.1.1 Install the Intel GPU DRA Driver
+
+Not part of the dynamo repo itself — this is a cluster-level, vendor-provided component that must
+be installed once per cluster before any of the templates in this whitepaper. Install via its
+published Helm chart:
+
+```bash
+helm install \
+  --namespace intel-gpu-resource-driver \
+  --create-namespace \
+  intel-gpu-resource-driver oci://ghcr.io/intel/intel-resource-drivers-for-kubernetes/intel-gpu-resource-driver-chart
+```
+
+Verify the driver is up and the `gpu.intel.com` `DeviceClass` and per-node `ResourceSlice`
+objects were published:
+
+```bash
+kubectl get pods -n intel-gpu-resource-driver
+kubectl get deviceclass gpu.intel.com
+kubectl get resourceslices
+```
+
+See the driver's own [GPU documentation](https://github.com/intel/intel-resource-drivers-for-kubernetes/blob/main/doc/gpu/USAGE.md)
+for container-runtime CDI requirements (CRI-O 1.23+ or Containerd 1.7+ with CDI enabled) and
+alternative install methods (kustomize, Node Feature Discovery-scoped rollout).
 
 ## 0.2 Install the Dynamo Kubernetes Platform
 
