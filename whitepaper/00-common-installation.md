@@ -34,9 +34,9 @@ helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
   --create-namespace
 ```
 
-> **Note**: the `dynamo-crds` Helm chart referenced by some older instructions is deprecated as of
-> v1.0.0 — CRDs are now installed and managed by the Dynamo Operator itself as part of the
-> `dynamo-platform` chart above. No separate CRD install step is needed on current releases.
+> **Note**: the `dynamo-crds` Helm chart is deprecated as of v1.0.0 — CRDs are now installed and
+> managed by the Dynamo Operator itself as part of the `dynamo-platform` chart above. No separate
+> CRD install step is needed on current releases.
 
 > **Intel XPU note**: unlike NVIDIA deployments, you do **not** need the NVIDIA GPU Operator.
 > Skip any GPU-Operator-specific step in the installation guide; the Intel device plugin/DRA
