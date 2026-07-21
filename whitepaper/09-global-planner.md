@@ -40,8 +40,18 @@ kubectl get pods -n ${K8S_NAMESPACE}
 kubectl get resourceclaim -n ${K8S_NAMESPACE}
 ```
 
-**Inference Test**: port-forward the Frontend service and send completion requests as in §1.5,
-observing (via `GlobalRouter`/`GlobalPlanner` logs) how requests are distributed across the 2
+**Inference Test**: port-forward the Frontend Deployment (`gp-ctrl-frontend`, following the
+`{DynamoGraphDeployment name}-frontend` pattern from §1.1) and send completion requests as in
+§1.1:
+
+```bash
+kubectl port-forward deployment/gp-ctrl-frontend 8000:8000 -n ${K8S_NAMESPACE}
+curl localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"${MODEL_NAME}\",\"prompt\":\"Hello\",\"max_tokens\":20}"
+```
+
+Observe (via `GlobalRouter`/`GlobalPlanner` logs) how requests are distributed across the 2
 prefill pools and 1 decode pool.
 
 **Troubleshooting**:

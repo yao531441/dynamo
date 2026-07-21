@@ -58,6 +58,8 @@ comparatively lighter encode stage), this recipe is the direct reference.
 
 ```bash
 export NAMESPACE=dynamo-demo
+export REPO_ROOT=$(realpath $(git rev-parse --show-toplevel))
+cd ${REPO_ROOT}/recipes/qwen3-vl-32b-fp8   # all relative paths below are from here
 kubectl create namespace ${NAMESPACE}
 
 kubectl create secret generic hf-token-secret \

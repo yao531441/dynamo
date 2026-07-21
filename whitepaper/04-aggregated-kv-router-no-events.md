@@ -4,11 +4,14 @@
 
 **Overview**: A variant of §1.3 using `--no-kv-events` on the Frontend
 (`dynamo.frontend --router-mode kv --no-kv-events`) and `enable_kv_cache_events: false` on the
-worker. Instead of consuming real KV events over NATS/JetStream, the router predicts cache state
-locally from its own routing decisions with TTL-based expiration/pruning. Benefits per upstream
-comments: no NATS/JetStream dependency, simpler deployment for lightweight scenarios.
+worker. Instead of consuming the ZMQ-published KV events that §1.3 uses, the router predicts
+cache state locally from its own routing decisions with TTL-based expiration/pruning. The
+template's own comments describe this as avoiding a "NATS or JetStream" dependency — that
+appears to refer to an alternate/older KV-event distribution path, since §1.3's actual
+`--kv-events-config` uses a ZMQ publisher, not NATS; either way, this mode has no external
+message-bus dependency of its own. Benefit: simpler deployment for lightweight scenarios.
 
-**Prerequisites**: Chapter 0 complete. No message-bus (NATS) dependency needed for this variant.
+**Prerequisites**: Chapter 0 complete. No message-bus dependency needed for this variant.
 
 **Deployment Steps**:
 

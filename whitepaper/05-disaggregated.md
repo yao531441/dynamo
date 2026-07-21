@@ -40,8 +40,8 @@ curl localhost:8000/v1/completions \
 **Troubleshooting**:
 - KV transfer failures between prefill and decode workers typically show up as NIXL connection
   errors in the decode worker's log — confirm both workers were scheduled with XPU devices
-  (`kubectl describe resourceclaim`) and that `kv_buffer_device` matches on both sides
-  (`kv_role: kv_both` on prefill, `kv_role: kv_consumer` on decode — both set to `"xpu"`).
+  (`kubectl describe resourceclaim`) and that `kv_buffer_device: xpu` is set identically on both
+  sides (`kv_role` itself differs by design: `kv_both` on prefill, `kv_consumer` on decode).
 - If either worker Pending forever, check `kubectl get resourceslices` for available device
   count — you need at least 2 free XPU devices across the cluster for this template.
 

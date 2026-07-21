@@ -15,14 +15,16 @@ Template reference: ../template.md
 >
 > All content below is derived from reading the actual repository files (YAML templates,
 > `README.md` files, `docs/kubernetes/*`). Nothing has been executed against a live Intel XPU
-> Kubernetes cluster yet — see the Status column in each chapter and in `tracking.md`. Validate
-> on real hardware before treating any command as final.
+> Kubernetes cluster yet — see the Status line in each chapter, and the companion `tracking.md`
+> file for the current per-case validation status. Validate on real hardware before treating any
+> command as final.
 >
 > **API version note**: Chapter 1's 8 templates use the `nvidia.com/v1alpha1` CRD schema
 > (`services:` map) — this is what the repo ships for all 8 Intel XPU patterns today. Dynamo is
 > mid-migration to a newer `nvidia.com/v1beta1` schema (`components:` list, a real structural
 > change, not just a version bump), but **XPU coverage under `v1beta1` is only partial**: just 2
-> of the 8 patterns (`agg`, `disagg`) have been ported so far — see `to_fi.md` for the full
+> of the 8 patterns (`agg`, `disagg`) have been ported so far — see the companion document
+> `to_fi.md` (shipped alongside this whitepaper, not included in this compiled PDF) for the full
 > breakdown. If you're on a newer Dynamo Platform release that expects `v1beta1`, check
 > `deploy/v1beta1/xpu/` for the latest state before assuming all 8 patterns are available there.
 
@@ -68,7 +70,10 @@ end confirmed so far (TensorRT-LLM).
   - [08-disaggregated-kv-router.md](08-disaggregated-kv-router.md) — 1.8 Disaggregated + KV Router (`disagg_router_xpu_dra.yaml`)
 - [09-global-planner.md](09-global-planner.md) — Chapter 2. Global Planner on Intel XPU (`global-planner-vllm-test-xpu-dra.yaml`) (In Progress)
 - [10-recipe-qwen3-vl-hetero-xpu-gpu.md](10-recipe-qwen3-vl-hetero-xpu-gpu.md) — Chapter 3. Recipe: Qwen3-VL-32B-FP8 Heterogeneous Hardware Disaggregation (Intel XPU encode + NVIDIA GPU decode) (In Progress)
-- [11-not-available-on-xpu.md](11-not-available-on-xpu.md) — Chapter 4. Feasible-but-Untemplated vs. Genuinely NVIDIA-Locked (Feasible / N/A)
+- [11-not-available-on-xpu.md](11-not-available-on-xpu.md) — Chapter 4. Feasible-but-Untemplated vs. Genuinely NVIDIA-Locked (gap analysis, not a deployment case — the Verified/In Progress/N/A labels above don't apply)
 - [appendix-a-env-vars.md](appendix-a-env-vars.md) — Appendix A. Environment Variables Reference
 - [appendix-b-known-issues.md](appendix-b-known-issues.md) — Appendix B. Known Issues / Workarounds
-- [tracking.md](tracking.md) — Appendix C. Case Verification Status (live tracker)
+
+> `tracking.md` and `to_fi.md` in this directory are separate, continuously-updated tracking
+> documents — useful when browsing the repository directly, but they are not chapters of this
+> whitepaper and are not included in the compiled PDF/Word export.

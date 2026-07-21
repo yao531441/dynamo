@@ -13,6 +13,15 @@ on top.
 
 ```bash
 export NAMESPACE=my-ns
+kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+# Chapter 0.4 created hf-token-secret in the platform namespace (dynamo-system) — every
+# DynamoGraphDeployment template also expects it in its own workload namespace, so re-create it
+# here (repeat this for every other namespace you use in Chapters 1-9):
+kubectl create secret generic hf-token-secret \
+  --from-literal=HF_TOKEN=${HF_TOKEN} \
+  -n ${NAMESPACE}
+
 kubectl apply -f examples/backends/vllm/deploy/xpu/agg_xpu_dra.yaml -n ${NAMESPACE}
 ```
 
