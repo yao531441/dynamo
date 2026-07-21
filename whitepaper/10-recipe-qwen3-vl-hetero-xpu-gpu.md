@@ -47,10 +47,18 @@ comparatively lighter encode stage), this recipe is the direct reference.
 
 - Dynamo Platform installed (see [Common Installation](00-common-installation.md)).
 - A cluster with **both** an Intel XPU node/pool and an NVIDIA GPU node/pool, each exposed via
-  Kubernetes DRA (`gpu.intel.com` and `gpu.nvidia.com` `DeviceClass`es respectively).
+  Kubernetes DRA (`gpu.intel.com` and `gpu.nvidia.com` `DeviceClass`es respectively). The Intel
+  side is the same [Intel GPU DRA driver](00-common-installation.md#011-install-the-intel-gpu-dra-driver)
+  installed in Chapter 0; the NVIDIA side is a separate vendor-provided component,
+  [`kubernetes-sigs/dra-driver-nvidia-gpu`](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu)
+  (install instructions on its
+  [documentation site](https://dra-driver-nvidia-gpu.sigs.k8s.io/docs/install/)), not covered
+  elsewhere in this whitepaper since every other chapter is Intel XPU-only.
 - **RDMA-capable network interfaces** between the Intel XPU and NVIDIA GPU nodes — this is a hard
   requirement, not optional; the recipe explicitly depends on a `rdma-dranet` DRA device class on
-  both sides for the NIXL embedding transfer.
+  both sides for the NIXL embedding transfer, provided by
+  [`kubernetes-sigs/dranet`](https://github.com/kubernetes-sigs/dranet) (also not installed by
+  either the Intel or NVIDIA GPU DRA drivers above — a third, separate component).
 - A HuggingFace token with access to Qwen models, stored as `hf-token-secret`.
 - A `StorageClass` supporting `ReadWriteMany` for the shared model cache PVC.
 
