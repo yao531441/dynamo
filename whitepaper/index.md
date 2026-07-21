@@ -35,14 +35,14 @@ combinations of serving pattern (aggregated / disaggregated) × optional add-ons
 KV-aware routing, planner-based autoscaling). There is also one Intel XPU example under
 `examples/global_planner/`.
 
-Repo-wide scan performed for this document (`grep -r xpu examples/ docs/ recipes/` across the
-`dynamo` repository) found **no Intel XPU-specific content** under most other vLLM-backend
-templates, the SGLang backend, the TensorRT-LLM backend, and most of `recipes/`. It **did** find
-one Intel XPU recipe under `recipes/qwen3-vl-32b-fp8/` — a heterogeneous Intel XPU (encode) +
-NVIDIA GPU (decode) disaggregation, written up in full in Chapter 3. Chapter 4 distinguishes
-templates that look **feasible but simply haven't been templated for Intel XPU yet** (LoRA,
-GAIE, multi-node disaggregation, GMS/failover — all with no hard hardware blocker found) from
-the one **genuine NVIDIA-only dependency** found (TensorRT-LLM's proprietary compiler).
+A repo-wide search (`grep -r xpu examples/ docs/ recipes/` across the `dynamo` repository) turns
+up **no Intel XPU-specific content** under most other vLLM-backend templates, the SGLang backend,
+the TensorRT-LLM backend, and most of `recipes/`. It **does** turn up one Intel XPU recipe under
+`recipes/qwen3-vl-32b-fp8/` — a heterogeneous Intel XPU (encode) + NVIDIA GPU (decode)
+disaggregation, written up in full in Chapter 3. Chapter 4 distinguishes templates that look
+**feasible but simply haven't been templated for Intel XPU yet** (LoRA, GAIE, multi-node
+disaggregation, GMS/failover — all with no hard hardware blocker found) from the one **genuine
+NVIDIA-only dependency** found (TensorRT-LLM's proprietary compiler).
 
 **Bottom line**: as of this writing, if you want to run Dynamo on Intel XPU, your options are
 the 8 templates in Chapter 1, the Global Planner example in Chapter 2, and the heterogeneous

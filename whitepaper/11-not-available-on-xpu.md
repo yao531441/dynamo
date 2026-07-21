@@ -15,10 +15,11 @@ these are gaps, not fundamental limitations:
 | GPU Memory Service (GMS) sidecar / failover | `backends/vllm/deploy/agg_gms.yaml`, `agg_failover.yaml`, `gms-failover.yaml` | Kubernetes DRA itself is vendor-neutral (Intel already has its own DRA driver, used by all 8 Chapter 1 templates). The real dependency is GMS's own device backend — its design doc (`lib/gpu_memory_service/GMS_MULTI_DEVICE.md`) shows CUDA support done and an Intel XPU backend planned as "Phase 2," just not implemented yet. Not a hard vendor lock-in, just unfinished |
 | KVBM (multi-tier KV cache: GPU→CPU→SSD→remote) | `backends/vllm/deploy/agg_kvbm.yaml`, `disagg_kvbm*.yaml` | Intel XPU support is real, active work-in-progress, not yet merged: PRs [#7946](https://github.com/ai-dynamo/dynamo/pull/7946) and [#10520](https://github.com/ai-dynamo/dynamo/pull/10520) add SYCL/Level-Zero XPU support to KVBM v2, tracked by DEP issue [#9313](https://github.com/ai-dynamo/dynamo/issues/9313), still in design discussion |
 | SGLang backend (all patterns) | `backends/sglang/deploy/{agg,agg_router,disagg,disagg_planner,disagg-multinode,agg_gms}.yaml` | No `xpu/` directory anywhere; SGLang engine's own Intel XPU support not independently verified — flagged as unconfirmed |
+| Triton Server backend | `backends/tritonserver/` | No `xpu/` directory anywhere; NVIDIA Triton Inference Server has historically been NVIDIA-GPU-centric, but no explicit hard-blocker statement found in the repo — flagged as unconfirmed rather than a confirmed lock-in |
 
-None of these have been hands-on tested on Intel XPU by this whitepaper's authors — "feasible"
-here means "no repo evidence of a hardware blocker," not "verified working." Treat as a backlog
-of candidate work, not a completed case.
+None of these have been hands-on tested on Intel XPU — "feasible" here means "no repo evidence
+of a hardware blocker," not "verified working." Treat as a backlog of candidate work, not a
+completed case.
 
 
 ## Genuinely NVIDIA-specific (real hardware/vendor lock-in found)
@@ -29,7 +30,6 @@ equivalent:
 | Feature | Path | Lock-in reason |
 |---|---|---|
 | TensorRT-LLM backend (all patterns, incl. multimodal: Qwen3-VL, Llama4, LLaVA, Qwen2-VL) | `backends/trtllm/` | TensorRT-LLM is NVIDIA's proprietary compiler/runtime (TensorRT), fundamentally CUDA/NVIDIA-GPU-only — no Intel XPU port exists upstream in TensorRT-LLM itself, so this is a hard vendor lock-in, not a templating gap |
-| Triton Server backend | `backends/tritonserver/` | Not investigated in depth for this whitepaper; NVIDIA Triton Inference Server has historically been NVIDIA-GPU-centric, flagged for follow-up rather than asserted |
 
 ## Recipes (`recipes/`) other than the Chapter 3 hetero case
 
