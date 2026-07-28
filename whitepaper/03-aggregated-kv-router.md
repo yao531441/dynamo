@@ -1,7 +1,5 @@
 # 1.3 Aggregated + KV Router (`agg_router_xpu_dra.yaml`)
 
-**Status**: documented from repo, not yet run hands-on.
-
 **Overview**: Adds Dynamo's KV-aware Router (`DYN_ROUTER_MODE=kv` on the Frontend) in front of
 2 aggregated worker replicas. **Important upstream-documented limitation**: in Aggregated mode,
 `VllmDecodeWorker` does not emit `BlockStored` KV cache events (those are only produced during

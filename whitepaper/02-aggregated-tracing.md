@@ -1,7 +1,5 @@
 # 1.2 Aggregated + Tracing (`agg_tracing_xpu_dra.yaml`)
 
-**Status**: documented from repo, not yet run hands-on.
-
 **Overview**: Same aggregated topology as §1.1, plus OpenTelemetry tracing instrumentation.
 Adds `DYN_LOGGING_JSONL=true` and `OTEL_EXPORT_ENABLED=true` at the `DynamoGraphDeployment`
 level, and per-service `OTEL_SERVICE_NAME` env vars (`dynamo-frontend`, `dynamo-worker-vllm`).

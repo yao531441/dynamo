@@ -1,6 +1,4 @@
-# Chapter 3 — Recipe: Qwen3-VL-32B-FP8 Heterogeneous Hardware Disaggregation (Intel XPU Encode + NVIDIA GPU Decode) (In Progress)
-
-**Status**: documented from official repo sources, not yet run hands-on.
+# Chapter 3 — Recipe: Qwen3-VL-32B-FP8 Heterogeneous Hardware Disaggregation (Intel XPU Encode + NVIDIA GPU Decode)
 
 ## Overview
 
